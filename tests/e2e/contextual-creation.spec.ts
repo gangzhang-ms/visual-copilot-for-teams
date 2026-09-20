@@ -4,7 +4,7 @@ import {pathToFileURL} from "node:url";
 import {mkdir,writeFile} from "node:fs/promises";
 import sharp from "sharp";
 import type {createLocalChatServer as Factory} from "../../src/server/local-chat-server";
-import {openCreate} from "../expression-ui";
+import {openCreate,waitForLocalSession} from "../expression-ui";
 import {offlineDraft} from "../../src/server/generation.test.support";
 const root=process.env.VISUAL_BUILD_ROOT??"dist",built=(file:string)=>pathToFileURL(resolve(root,"server",file)).href;
 let app:Awaited<ReturnType<typeof Factory>>,origin:string,plans:string[],ranks:string[],images:string[],queries:string[];
@@ -70,6 +70,7 @@ test.beforeEach(async()=>{
 });
 test.afterEach(async()=>{release?.();await app.close();});
 async function api(page:Page,path:string,body:object={}){
+  await waitForLocalSession(page);
   return page.evaluate(async({path,body})=>{
     const state=await(await fetch("/local/session",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json();
     const r=await fetch("/local/"+path,{method:"POST",headers:{"Content-Type":"application/json","X-Local-CSRF":state.csrf},
@@ -203,7 +204,8 @@ test("unknown or excluded visual IDs are rejected before any model request",asyn
   expect(result.status).not.toBe(200);expect(plans.length+queries.length+images.length).toBe(0);
 });
 test("explicit included visual wins over a later GIF, preserves ten contexts and treats conflicting caption as data",async({page})=>{
-  await page.goto(origin+"/chat");await api(page,"demo",{language:"en"});
+  await page.goto(origin+"/chat");
+  expect((await api(page,"demo",{language:"en"})).status).toBe(200);
   let state=(await api(page,"state")).value;
   const film=state.messages.find((m:{demoMedia?:string})=>m.demoMedia==="user-reference");
   expect((await api(page,"edit",{id:film.id,speaker:film.speaker,text:"PRIVATE_PROJECT_771: caption claims an unrelated franchise"})).status).toBe(200);

@@ -1,5 +1,11 @@
 import {expect,type Page,type Route} from "@playwright/test";
 import type {LocalGenerationReview} from "../src/shared/local-chat";
+export async function waitForLocalSession(page:Page){
+  const main=page.getByRole("main",{includeHidden:true});
+  await expect(main).toBeVisible();
+  await expect(main).toHaveAttribute("aria-busy","false");
+  await expect(main).not.toHaveAttribute("inert");
+}
 export async function holdCreationReview(page:Page){
   let deliver!:(review:LocalGenerationReview)=>void,unblock!:()=>void,finished!:()=>void;
   const review=new Promise<LocalGenerationReview>(resolve=>{deliver=resolve;}),gate=new Promise<void>(resolve=>{unblock=resolve;});
@@ -19,7 +25,7 @@ export async function openCreationOptions(page:Page){
   if(await options.count()&&await options.getAttribute("open")===null)await options.locator(":scope > summary").click();
 }
 export async function openCreate(page:Page,language="en",advanced=true){
-  await expect(page.locator("main.local-layout")).not.toHaveAttribute("inert","");
+  await waitForLocalSession(page);
   const tabs=page.locator(".local-tabs"),legacy=tabs.getByRole("button",{name:language==="en"?"Create":"创作",exact:true});
   if(!await tabs.isVisible())await page.locator(".local-composer").getByRole("button",{name:language==="en"?"Help me express":"帮我表达",exact:true}).click();
   if(await legacy.count())await legacy.click();
