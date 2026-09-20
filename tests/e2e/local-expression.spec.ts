@@ -3,6 +3,8 @@ import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import sharp from "sharp";
 import {mkdir} from "node:fs/promises";
+import {createServer} from "node:http";
+import type {AddressInfo} from "node:net";
 import type {createLocalChatServer as Factory} from "../../src/server/local-chat-server";
 import {emptySpeakerProfile} from "../../src/shared/expression";
 import {emptyCreativeDraft} from "../../src/client/UnifiedExpression";
@@ -280,6 +282,36 @@ test("changing the outgoing speaker during internal review cancels the clicked r
   await held.release();
   await expect(page.getByRole("button",{name:"Generate image",exact:true})).toBeEnabled();
   expect(imageBodies).toHaveLength(0);
+});
+test("one-use review hold preserves fallback precedence and immediate follow-up dispatch",async({page})=>{
+  let reviews=0,processes=0,fallbacks=0;
+  const server=createServer((req,res)=>{
+    if(req.url==="/local/generation/review")reviews++;
+    if(req.url==="/local/generation/process")processes++;
+    res.writeHead(200,{"Content-Type":"application/json"});
+    res.end(JSON.stringify({synthetic:true}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  try{
+    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+    await page.route("**/local/generation/review",async route=>{fallbacks++;await route.continue();});
+    const held=await holdCreationReview(page);
+    const first=page.evaluate(async()=>{
+      await fetch("/local/generation/review",{method:"POST"});
+      return (await fetch("/local/generation/process",{method:"POST"})).status;
+    });
+    await held.review;
+    expect(processes).toBe(0);expect(fallbacks).toBe(0);
+    expect(await page.evaluate(async()=>(await fetch("/local/generation/review",{method:"POST"})).status)).toBe(200);
+    expect(fallbacks).toBe(1);expect(processes).toBe(0);
+    await held.release();
+    expect(await first).toBe(200);expect(processes).toBe(1);
+    expect(await page.evaluate(async()=>(await fetch("/local/generation/review",{method:"POST"})).status)).toBe(200);
+    expect(fallbacks).toBe(2);expect(reviews).toBe(3);
+  }finally{
+    await page.close();
+    await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+  }
 });
 for(const language of ["en","zh-CN"] as const)test(`clean ${language} single click preserves exact reviewed request and user choices without a confirmation card`,async({page})=>{
   const t=(en:string,zh:string)=>language==="en"?en:zh;
