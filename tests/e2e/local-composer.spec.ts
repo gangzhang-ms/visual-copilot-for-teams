@@ -163,6 +163,8 @@ for(const language of ["en","zh-CN"])test(`${language} demo atomically loads fiv
   expect(metadata.pages).toBe(12);expect(metadata.delay).toEqual(Array(12).fill(100));
   expect(inputs).toHaveLength(0);expect(app.memeCounters.metadataRequests).toBe(0);
   await expect(page.getByTestId("chat-message")).toHaveCount(5);
+  await expect(page.locator(".local-messages").getByRole("note")).toHaveCount(2);
+  await expect(page.locator(".local-messages").getByRole("note").first()).toContainText(t("Synthetic test fixture","合成测试占位素材"));
   expect(await page.locator(".local-messages").innerText()).not.toMatch(/illustration|pan\/zoom|预备|插画|未新增|not native/iu);
   const reference=await readFile(resolve("assets","chat-demo","film-reference.png"));
   expect(Buffer.from(room.messages[1].attachment.dataUrl.split(",")[1],"base64")).toEqual(reference);

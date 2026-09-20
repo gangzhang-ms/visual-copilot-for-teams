@@ -7,7 +7,7 @@ export function sameOrigin(request: IHttpServerRequest, config: BotConfig) {
   const origin = request.headers.origin;
   requireVisual(origin === config.publicOrigin && ["same-origin", undefined].includes(request.headers["sec-fetch-site"] as string | undefined), "permission-denied");
 }
-const page = (completion = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Visual Context sign in</title></head><body><main id="auth" data-completion="${completion}">Signing in…</main><script src="/auth-bootstrap.js"></script></body></html>`;
+const page = (completion = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Visual Copilot for Teams sign in</title></head><body><main id="auth" data-completion="${completion}">Signing in…</main><script src="/auth-bootstrap.js"></script></body></html>`;
 export function registerAuthRoutes(adapter: NativeHttpAdapter, config: BotConfig, auth: AuthSessions) {
   adapter.registerPage("/auth/start", () => page());
   adapter.registerPage("/auth-bootstrap.js", () => `(function(){var m=/^#bootstrap=([A-Za-z0-9_-]{43})$/.exec(location.hash);history.replaceState(null,"",location.pathname);var h=m?m[1]:"";import("/assets/auth-entry.js").then(function(x){x.start(h);});})();`);

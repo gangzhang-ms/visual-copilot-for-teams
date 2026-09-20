@@ -6,7 +6,7 @@ import { initialPreferences } from "./visual-i18n";
 it("renders private gated workflow without inventing candidates or sending controls", () => {
   const markup = renderToStaticMarkup(<VisualApp claim={{ schemaVersion: 1, invocationId: "fixture", selected: { mode: "selected", context: "" }, command: "explainVisual", bootstrap: "synthetic" }}
     host={{ initialize: async () => ({ kind: "teams", theme: "default", showEnglishNotice: false }), onThemeChange: () => () => undefined, authenticate: async () => "", insert: () => undefined }} />);
-  expect(markup).toContain("Visual Context for Teams");
+  expect(markup).toContain("Visual Copilot for Teams");
   expect(markup).toContain("Pixels are not anonymized");
   expect(markup).toContain("Sign in with Teams popup");
   expect(markup).not.toContain("Insert into Teams draft");

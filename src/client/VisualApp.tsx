@@ -47,7 +47,7 @@ export function VisualApp({ claim, host }: { claim: ClaimResponse; host: HostAda
   });
   const cancel = () => { resetDerived(); if (signedIn) void run(async () => { await api.call("/api/session/invalidate"); }); };
   const invalidateShare = () => { shareGeneration.current++; setShare(undefined); if (signedIn) void run(async () => { await api.call("/api/share/invalidate"); }); };
-  return <div className="app-shell visual-app"><header><h1>Visual Context for Teams</h1>
+  return <div className="app-shell visual-app"><header><h1>Visual Copilot for Teams</h1>
     <label>{t("UI language", "界面语言")}<select value={language} onChange={e => setLanguage(e.target.value as Language)}><option value="en">English</option><option value="zh-CN">简体中文</option></select></label>
     <h2>{claim.command === "explainVisual" ? t("Explain this visual privately", "私密解释此视觉素材") : t("Express this — find three candidates", "表达此意 — 查找三个候选素材")}</h2>
   </header>

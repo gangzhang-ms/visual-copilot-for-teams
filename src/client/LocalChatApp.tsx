@@ -464,6 +464,7 @@ export function LocalChatApp() {
               <p>{m.text}</p>{state.emojiExpressions&&<EmojiInspector key={m.text} text={m.text} language={language} analysis={inlineAnalysis(m)}/>}
               {m.attachment&&m.demoMedia==="custom-emoji"?<CustomEmojiArtwork dataUrl={m.attachment.dataUrl} language={language} analysis={inlineAnalysis(m)}/>:
                 hasLocalVisual(m)&&<MessageVisual message={m} language={language} analysis={inlineAnalysis(m)}/>}
+              {(m.demoMedia==="user-reference"||m.demoMedia==="local-motion")&&<p className="local-muted" role="note">{t("Synthetic test fixture · not a film frame or live AI result","合成测试占位素材 · 非电影画面或实时 AI 结果")}</p>}
               <MessageActions language={language} busy={busy} canEdit={!m.visual} canExplain={canExplainMessage(m)} onExplain={()=>choose(m)}
                 mediaInfo={(m.demoMedia||m.visual||m.generated)?<>
                   {m.demoMedia&&<p>{m.demoMedia==="custom-emoji"?t("Original custom emoji · locally authored SVG/PNG · no AI image generation or external source · local demo use","原创自定义 emoji · 本地绘制 SVG/PNG · 非 AI 生图，无外部素材 · 用于本地演示"):m.demoMedia==="user-reference"?t("Synthetic geometric publication fixture · not a film frame · not source-recognition evidence","发布版几何测试占位图 · 非电影画面 · 不能作为出处识别证据"):m.demoMedia==="local-motion"?t("Synthetic geometric test animation · illustrative placeholder, not native video · no AI call","几何测试动画 · 仅为示意占位素材，非原生视频 · 无 AI 调用"):t("Synthetic geometric test illustration · illustrative placeholder, not a live reply","几何测试插画 · 仅为示意占位素材，并非即时 AI 回复")}</p>}

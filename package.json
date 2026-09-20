@@ -1,5 +1,5 @@
 {
-  "name": "emoji-copilot-for-teams",
+  "name": "visual-copilot-for-teams",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -143,5 +143,6 @@
     "typescript": "^5.8.3",
     "vite": "^6.1.0",
     "vitest": "^3.2.4"
-  }
+  },
+  "description": "Standalone contextual visual Explain/Express prototype for images, GIFs, stickers and Unicode emoji; gated Teams integration."
 }

@@ -44,5 +44,5 @@ function isClaim(value: unknown): value is ClaimResponse {
 }
 function fail() {
   const root = document.getElementById("root");
-  if (root) { root.textContent = "Visual Context is unavailable: unsupported host or expired link. Close and reopen in Teams."; root.setAttribute("role", "alert"); }
+  if (root) { root.textContent = "Visual Copilot for Teams is unavailable: unsupported host or expired link. Close and reopen in Teams."; root.setAttribute("role", "alert"); }
 }

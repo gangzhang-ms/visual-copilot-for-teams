@@ -3,7 +3,7 @@
   "botAppId": "22222222-2222-4222-8222-222222222222",
   "tenantId": "33333333-3333-4333-8333-333333333333",
   "publicOrigin": "https://current-tunnel.example",
-  "displayName": "Visual Context for Teams",
+  "displayName": "Visual Copilot for Teams",
   "authRedirectUri": "https://current-tunnel.example/api/auth/callback",
   "liveGates": { "H01": "not-verified", "H02": "not-verified", "H03": "not-verified", "H04": "not-verified" }
 }

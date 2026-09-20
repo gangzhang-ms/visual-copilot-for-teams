@@ -11,5 +11,5 @@ export async function start(bootstrap: string) {
     const result = await response.json(), url = new URL(result.url);
     if (url.protocol !== "https:" || url.hostname !== "login.microsoftonline.com") throw new Error("auth-required");
     window.location.assign(url.href);
-  } catch { if (root) root.textContent = "Sign-in unavailable or cancelled. Close and reopen Visual Context."; authentication.notifyFailure("auth-required"); }
+  } catch { if (root) root.textContent = "Sign-in unavailable or cancelled. Close and reopen Visual Copilot for Teams."; authentication.notifyFailure("auth-required"); }
 }

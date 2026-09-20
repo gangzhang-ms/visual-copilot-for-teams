@@ -24,7 +24,7 @@ export function App({ initialContext = "", attachmentNotice }: { initialContext?
     setMessage(outcome.copied ? "Copied to clipboard." : outcome.message);
   };
   return <div className="app-shell">
-    <header><p className="eyebrow">Manual/local demo — deterministic, not connected AI</p><h1>Visual Context for Teams</h1><p>Choose a workplace-safe emoji, then copy and paste it yourself.</p></header>
+    <header><p className="eyebrow">Legacy Unicode-only sandbox — deterministic, not connected AI</p><h1>Visual Copilot for Teams</h1><p>This sandbox suggests Unicode emoji for manual copy/paste. Images, GIFs, stickers and contextual Explain/Express belong to the separately configured local chat prototype; see the README.</p></header>
     <aside className="notice" aria-label="Privacy and language notice"><strong>English recommendations only.</strong> Context is processed only in this page’s memory. It is not stored, logged, sent to an external model, or posted to Teams. Do not paste secrets or regulated data.</aside>
     {attachmentNotice && <p className="notice" role="status">{attachmentNotice}</p>}
     <main>

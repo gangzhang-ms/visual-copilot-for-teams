@@ -2,7 +2,9 @@
 
 A standalone, local-first prototype for understanding visual messages and
 composing visual replies in a Teams-style conversation. It supports images,
-GIFs, custom emoji and Unicode emoji, with English and Simplified Chinese UI.
+GIFs, static stickers, custom-image emoji and Unicode emoji, with English and
+Simplified Chinese UI. Emoji are one supported content type, not the scope of
+the whole application.
 
 **Status:** the local prototype works; a production Teams/Graph integration
 is not complete. Teams authentication, selected-message handling, packaging
@@ -19,8 +21,10 @@ credentials, approval and billing.
   and an identified source when available. **Details** reveals the complete
   background, observations, interpretations, uncertainty and references from
   the **same original result**, without a second AI call.
-- **Express:** choose Unicode emoji or visual replies, review a preview, and
-  manually insert the selection into the composer. Nothing sends automatically.
+- **Express:** choose Unicode emoji or visual replies; find existing visual
+  candidates or explicitly create a new still image when the relevant provider
+  is configured. Review a preview and manually insert the selection into the
+  composer. Nothing sends automatically.
 - **Keep the reply coherent:** **Match reply context** aims to preserve the
   selected visual's photographic, illustrated or rendered medium unless an
   explicit new style is requested. This behavior has offline unit/browser
@@ -31,6 +35,27 @@ person's intentions or a visual's origin. An AI-generated interpretation is
 not an authentic film frame. Search results can be unavailable, blocked or
 incorrect; not all retrieval/provider paths have been demonstrated to work.
 Source attribution alone does not grant permission to reuse media.
+
+## Media scope and entry points
+
+| Surface | Actual scope and limits |
+| --- | --- |
+| Configured standalone `/chat` | Contextual Explain and Express for visual messages and Unicode emoji; this is the main local prototype. |
+| `index.html` / Vite landing page | Legacy English-only, deterministic Unicode recommendation sandbox. It is not the full visual workflow and does not call AI. |
+| `local-chat.html` | Local-chat frontend shell; connected operations still require the separately configured local backend. |
+| Teams message-extension dialog | Gated integration code, not production-ready Teams/Graph deployment. |
+
+The local composer accepts PNG, JPEG and GIF, up to **1 MiB per attachment**,
+subject to decoder and model-profile limits. Screenshots and memes use the
+same raster-image path. Static stickers and custom-image emoji are images,
+not arbitrary Teams sticker packages. SVG, WebP and video uploads are not
+advertised as supported formats.
+
+GIF playback is distinct from AI analysis: the model receives bounded,
+normalized **sampled stills**, which can miss intervening frames, motion and
+timing. Image generation produces a still PNG. Where a GIF output option is
+available, it creates local pan/zoom animation from that still; it is **not
+native AI-generated animated GIF or video**.
 
 ## Repository and publication scope
 
@@ -65,6 +90,8 @@ Run these commands **in a fresh publication checkout**, not in a directory
 whose build output is currently serving another session:
 
 ```powershell
+git clone https://github.com/gangzhang-ms/visual-copilot-for-teams.git
+cd visual-copilot-for-teams
 npm ci
 npm run assets:prepare
 npm run typecheck

@@ -10,7 +10,7 @@ for (const [index, id, context] of [[0, "explainVisual", "message"], [1, "recomm
   const command = ext[0].commands[index];
   if (command.id !== id || command.type !== "action" || command.fetchTask !== true || command.context?.join() !== context || command.parameters?.length) throw new Error("Action command contract mismatch.");
 }
-if (manifest.name.short !== "Visual Context" || manifest.name.full !== "Visual Context for Teams") throw new Error("Display branding mismatch.");
+if (manifest.name.short !== "Visual Copilot" || manifest.name.full !== "Visual Copilot for Teams") throw new Error("Display branding mismatch.");
 if (manifest.id === ext[0].botId) throw new Error("Teams App and Bot App IDs must be distinct.");
 if (manifest.validDomains?.length !== 1 || manifest.validDomains[0].includes("*")) throw new Error("Exactly one non-wildcard valid domain is required.");
 for (const url of [manifest.developer.websiteUrl, manifest.developer.privacyUrl, manifest.developer.termsOfUseUrl]) if (new URL(url).host !== manifest.validDomains[0]) throw new Error("Origin/domain mismatch.");

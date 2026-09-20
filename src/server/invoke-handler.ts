@@ -16,7 +16,7 @@ export function handleFetchTask(activity: unknown, config: BotConfig, store: Inv
     });
     const url = `${config.publicOrigin}/dialog#token=${token}`;
     log.record("invoke_accepted");
-    return { task: { type: "continue" as const, value: { title: "Visual Context for Teams", width: 680, height: 720, url, fallbackUrl: url } } };
+    return { task: { type: "continue" as const, value: { title: "Visual Copilot for Teams", width: 680, height: 720, url, fallbackUrl: url } } };
   } catch (error) {
     log.record("invoke_rejected");
     throw error;
