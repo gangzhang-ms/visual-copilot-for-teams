@@ -8,17 +8,21 @@ export async function waitForLocalSession(page:Page){
 }
 export async function holdCreationReview(page:Page){
   let deliver!:(review:LocalGenerationReview)=>void,unblock!:()=>void,finished!:()=>void;
+  let held=false;
   const review=new Promise<LocalGenerationReview>(resolve=>{deliver=resolve;}),gate=new Promise<void>(resolve=>{unblock=resolve;});
   const done=new Promise<void>(resolve=>{finished=resolve;});
   page.once("close",unblock);
   const handler=async(route:Route)=>{
+    if(held){await route.fallback();return;}
+    held=true;
     try{
       const response=await route.fetch();expect(response.status()).toBe(200);deliver(await response.json());
       await gate;if(!page.isClosed())await route.fulfill({response});
     }finally{finished();}
   };
   await page.route("**/local/generation/review",handler);
-  return {review,release:async()=>{unblock();await done;page.off("close",unblock);if(!page.isClosed())await page.unroute("**/local/generation/review",handler);}};
+  // Keep interception stable as fulfillment dispatches the next request; later reviews fall through until page teardown.
+  return {review,release:async()=>{unblock();await done;page.off("close",unblock);}};
 }
 export async function openCreationOptions(page:Page){
   const options=page.locator(".creation-advanced");
