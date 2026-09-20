@@ -1,0 +1,7 @@
+.emoji-inspector .emoji-inspector-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 8px; }
+.emoji-inspector .emoji-inspector-choices button { min-width: 44px; min-height: 44px; font-size: 28px; line-height: 1.3; }
+.emoji-inspector button[aria-pressed="true"] { outline: 2px solid #6264a7; outline-offset: 1px; }
+.emoji-inspector button:focus-visible { outline: 3px solid #373879; outline-offset: 3px; }
+.emoji-inspector .emoji-enlarged { display: block; font-size: 96px; line-height: 1.4; text-align: center; white-space: nowrap; }
+.emoji-inspector .emoji-codepoints { overflow-wrap: anywhere; font-family: monospace; font-size: 12px; }
+.emoji-inspector-pages { display: flex; justify-content: space-between; gap: 8px; }

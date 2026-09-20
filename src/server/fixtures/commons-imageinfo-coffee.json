@@ -1,0 +1,45 @@
+{
+  "batchcomplete": true,
+  "continue": {"gsroffset": 3, "continue": "gsroffset||"},
+  "query": {
+    "pages": [{
+      "pageid": 107645,
+      "ns": 6,
+      "title": "File:A small cup of coffee.JPG",
+      "index": 1,
+      "imagerepository": "local",
+      "badfile": false,
+      "imageinfo": [{
+        "size": 401623,
+        "width": 1600,
+        "height": 1200,
+        "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/45/A_small_cup_of_coffee.JPG/960px-A_small_cup_of_coffee.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+        "thumbwidth": 512,
+        "thumbheight": 384,
+        "thumbmime": "image/jpeg",
+        "responsiveUrls": {
+          "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/45/A_small_cup_of_coffee.JPG/1280px-A_small_cup_of_coffee.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+        },
+        "thumbattribs": {
+          "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/45/A_small_cup_of_coffee.JPG/960px-A_small_cup_of_coffee.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+          "decoding": "async",
+          "loading": "lazy",
+          "width": 512,
+          "height": 384,
+          "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/45/A_small_cup_of_coffee.JPG/1280px-A_small_cup_of_coffee.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+        },
+        "url": "https://upload.wikimedia.org/wikipedia/commons/4/45/A_small_cup_of_coffee.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "descriptionurl": "https://commons.wikimedia.org/wiki/File:A_small_cup_of_coffee.JPG",
+        "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=107645",
+        "extmetadata": {
+          "Credit": {"value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>", "source": "commons-desc-page"},
+          "Artist": {"value": "<a rel=\"nofollow\" class=\"external text\" href=\"http://assembleme.com/\">Julius Schorzman</a>", "source": "commons-desc-page"},
+          "LicenseShortName": {"value": "CC BY-SA 2.0", "source": "commons-desc-page", "hidden": ""},
+          "LicenseUrl": {"value": "https://creativecommons.org/licenses/by-sa/2.0", "source": "commons-desc-page"},
+          "Restrictions": {"value": "", "source": "commons-desc-page", "hidden": ""}
+        },
+        "mime": "image/jpeg"
+      }]
+    }]
+  }
+}

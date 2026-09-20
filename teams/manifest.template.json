@@ -1,0 +1,42 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "2.0.0",
+  "id": "__TEAMS_APP_ID__",
+  "developer": {
+    "name": "Visual Context Hackathon Team",
+    "websiteUrl": "__TEAMS_APP_ORIGIN__",
+    "privacyUrl": "__TEAMS_APP_ORIGIN__",
+    "termsOfUseUrl": "__TEAMS_APP_ORIGIN__"
+  },
+  "name": { "short": "Visual Context", "full": "Visual Context for Teams" },
+  "description": {
+    "short": "Privately explain visuals and find audience-aware visual expressions.",
+    "full": "Review authorized context, voluntary preferences and visual pixels before private processing. Find three rights-eligible candidates, review public notices, and explicitly insert into a Teams draft. Native Send remains required. Live capabilities require verified configuration."
+  },
+  "icons": { "outline": "outline.png", "color": "color.png" },
+  "accentColor": "#5B5FC7",
+  "composeExtensions": [{
+    "botId": "__BOT_APP_ID__",
+    "commands": [{
+      "id": "explainVisual",
+      "type": "action",
+      "title": "Explain this visual",
+      "description": "Privately explain a selected visual with reviewed context",
+      "initialRun": false,
+      "fetchTask": true,
+      "context": ["message"],
+      "parameters": []
+    }, {
+      "id": "recommendVisual",
+      "type": "action",
+      "title": "Express this",
+      "description": "Find three eligible visual expressions and review a draft",
+      "initialRun": false,
+      "fetchTask": true,
+      "context": ["compose", "message"],
+      "parameters": []
+    }]
+  }],
+  "validDomains": ["__TEAMS_APP_DOMAIN__"]
+}

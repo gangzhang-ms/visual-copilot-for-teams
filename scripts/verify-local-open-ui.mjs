@@ -1,0 +1,54 @@
+import { chromium,expect } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import {ownedBrowserSession} from "./local-browser-session.mjs";
+const port=Number(process.env.LOCAL_CHAT_PORT??4320);
+if(!Number.isInteger(port)||port<1024||port>65535)throw new Error("Invalid loopback port");
+const origin=`http://127.0.0.1:${port}`,browser=await chromium.launch({channel:"msedge"});
+const context=await browser.newContext(),page=await context.newPage();let paidRoutes=0,allPassed=false;
+const owned=ownedBrowserSession(page,origin);
+page.on("request",r=>{if(["/local/process","/local/generation/process"].includes(new URL(r.url()).pathname))paidRoutes++;});
+try{
+  await owned.start();
+  await page.goto(origin+"/chat");
+  await page.getByLabel("Language / 语言").selectOption("en");
+  await page.getByRole("button",{name:"Create",exact:true}).click();
+  await page.getByLabel("Creative intent",{exact:true}).fill("Original geometric greeting for a fictional puzzle.");
+  await page.getByRole("button",{name:"Prepare exact creative brief",exact:true}).click();
+  const creative=page.getByRole("region",{name:"Exact creative request"});
+  await expect(creative).toContainText("your-image-deployment");
+  await expect(creative.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Generate with real AI (billed)",exact:true})).toBeEnabled();
+  await expect(page.getByTestId("generation-readiness")).not.toContainText("remaining");
+  await page.getByLabel("Creative description",{exact:true}).fill("One circle, no text.");
+  await expect(creative).toHaveCount(0);
+  await page.getByRole("button",{name:"Express",exact:true}).click();
+  await page.getByLabel("Intent or question",{exact:true}).fill("Encourage a fictional puzzle team.");
+  await page.getByRole("button",{name:"Preview model request",exact:true}).click();
+  await expect(page.getByRole("region",{name:"Transmission preview"}).getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Run real AI (billed)",exact:true})).toBeEnabled();
+  await page.getByLabel("Message",{exact:true}).fill("An original fabricated test message.");
+  await page.getByRole("button",{name:"Add locally",exact:true}).click();
+  await page.getByTestId("chat-message").getByRole("button",{name:"Explain",exact:true}).click();
+  await page.getByRole("button",{name:"Preview model request",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Run real AI (billed)",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:/Review local asset library/}).click();
+  await expect(page.getByRole("region",{name:"Local asset review"}).locator("article")).toHaveCount(8);
+  await expect(page.getByRole("region",{name:"Local asset review"}).getByRole("checkbox")).toHaveCount(0);
+  await page.getByRole("button",{name:"Close library",exact:true}).click();
+  await page.getByLabel("Language / 语言").selectOption("zh-CN");
+  await page.getByRole("button",{name:"创作",exact:true}).click();
+  await page.getByLabel("创作意图",{exact:true}).fill("虚构解谜游戏的原创几何问候图");
+  await page.getByRole("button",{name:"准备确切创作简报",exact:true}).click();
+  await expect(page.getByRole("button",{name:"使用真实 AI 生成（计费）",exact:true})).toBeEnabled();
+  await expect(page.getByRole("region",{name:"确切创作请求"}).getByRole("checkbox")).toHaveCount(0);
+  await page.setViewportSize({width:320,height:900});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  expect(paidRoutes).toBe(0);allPassed=true;
+}finally{
+  const state=await owned.close().finally(async()=>{await context.close();await browser.close();});
+  if(allPassed){expect(state.closed).toBe(true);expect(state.generation.remainingCalls).toBeNull();expect(state.generation.expiresAt).toBeUndefined();}
+  const report={recordedAt:new Date().toISOString(),origin,allPassed,paidRoutes,mocked:false,bilingual:true,width320:true,ownRoomClosed:state.closed,...state};
+  await writeFile(resolve(".local","visual-context","local-open-ui-smoke.json"),JSON.stringify(report,null,2)+"\n");
+  process.stdout.write(JSON.stringify(report,null,2)+"\n");
+}

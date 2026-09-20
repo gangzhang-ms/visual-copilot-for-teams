@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "profile": null,
+  "approvedImageCalls": 0,
+  "reason": "image-not-provisioned-or-authorized",
+  "candidateOnly": {
+    "account": "your-azure-openai-resource",
+    "model": "gpt-image-1.5",
+    "modelVersion": "2025-12-16",
+    "region": "US",
+    "sku": "DataZoneStandard",
+    "capacity": 1
+  }
+}

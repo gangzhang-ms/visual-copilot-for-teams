@@ -1,0 +1,5 @@
+.custom-emoji-artwork { margin-block: 8px; }
+.custom-emoji-artwork .custom-emoji-trigger { padding: 0; display: block; background: transparent; border: 0; border-radius: 0; }
+.custom-emoji-artwork .custom-emoji-icon { display: block; width: 48px; height: 48px; object-fit: contain; }
+.custom-emoji-artwork .custom-emoji-preview { display: block; width: 256px; height: auto; max-width: 100%; margin-inline: auto; }
+.custom-emoji-trigger:focus-visible { outline: 3px solid #373879; outline-offset: 3px; }

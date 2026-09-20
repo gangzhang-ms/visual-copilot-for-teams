@@ -1,0 +1,5 @@
+.inline-emoji-explanation { max-width: 34rem; min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+.inline-emoji-explanation p { margin-block: 8px; white-space: normal; }
+.inline-emoji-explanation button { max-width: 100%; white-space: normal; }
+.inline-emoji-explanation button:focus-visible { outline: 3px solid #373879; outline-offset: 3px; }
+.inline-emoji-explanation [role="alert"] { color: #9e2525; }

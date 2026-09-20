@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="384" height="384" viewBox="0 0 384 384">
+  <defs><linearGradient id="brain" x2=".2" y2="1"><stop stop-color="#ffd1dc"/><stop offset="1" stop-color="#dd8db8"/></linearGradient></defs>
+  <circle cx="192" cy="194" r="149" fill="#edf2ff"/>
+  <circle cx="192" cy="186" r="137" fill="none" stroke="#cbd6ed" stroke-width="12" stroke-dasharray="12 17"/>
+  <path d="M85 104a137 137 0 0 1 220 26" fill="none" stroke="#e7a745" stroke-width="17" stroke-linecap="round"/>
+  <path d="m284 130 32 13 5-34" fill="none" stroke="#e7a745" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M190 123c-24-28-56-17-65 5-29-1-44 20-41 45-23 16-20 49-3 63-8 27 13 54 39 54 13 31 54 29 70 5 17 26 58 26 71-4 30 0 49-30 40-56 23-22 17-51-4-64 4-27-15-46-42-44-16-29-48-25-65-4z" fill="url(#brain)" stroke="#574965" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M191 127v164M126 139q-13 30 8 43m-46-9q28-7 40 17m-38 43q28-19 44 7m-13 46q-8-24 17-37m14-41q35-4 37 24m-22-91q-20 20-8 39m94-40q13 26-8 44m49-13q-29-4-36 22m40 40q-27-18-45 10m9 42q10-25-17-38m-15-38q-29-5-29 23m26-92q17 19 9 40" fill="none" stroke="#a66191" stroke-width="8" stroke-linecap="round"/>
+  <g fill="#fffdf7" stroke="#697c9f" stroke-width="6">
+    <rect x="27" y="174" width="47" height="55" rx="9" transform="rotate(-16 50 202)"/>
+    <rect x="307" y="242" width="45" height="54" rx="9" transform="rotate(13 329 270)"/>
+  </g>
+  <path d="m42 190 16-4m-12 17 15-4m260 51 15 3m-17 11 15 3" stroke="#9caac3" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="158" cy="341" r="7" fill="#e7a745"/><circle cx="192" cy="341" r="7" fill="#9d95bd"/><circle cx="226" cy="341" r="7" fill="#c4bfd5"/>
+</svg>

@@ -1,0 +1,70 @@
+import { chromium,expect } from "@playwright/test";
+import { mkdir,writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import {ownedBrowserSession} from "./local-browser-session.mjs";
+
+const origin="http://127.0.0.1:4321",directory=resolve(".local","visual-context","studio-screenshots");
+await mkdir(directory,{recursive:true});
+const browser=await chromium.launch({channel:"msedge"}),context=await browser.newContext({viewport:{width:1440,height:900}}),page=await context.newPage();
+let paidRoutes=0,passed=false;const errors=[],screenshots=[];
+const owned=ownedBrowserSession(page,origin);
+page.on("pageerror",()=>errors.push("browser-script-error"));
+page.on("request",r=>{if(["/local/process","/local/generation/process"].includes(new URL(r.url()).pathname))paidRoutes++;});
+async function capture(name,width,height){
+  await page.setViewportSize({width,height});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1&&document.documentElement.scrollHeight<=innerHeight+1)).toBe(true);
+  await page.mouse.move(1,1);
+  await page.screenshot({path:resolve(directory,name+".png")});screenshots.push(name+".png");
+}
+try{
+  await owned.start();
+  const health=await page.request.get(origin+"/healthz");expect(health.ok()).toBe(true);
+  await page.goto(origin+"/chat");await expect(page.getByLabel("Language / 语言")).toBeEnabled();
+  await page.getByRole("button",{name:"从演示对话开始",exact:true}).click();
+  await expect(page.getByTestId("chat-message")).toHaveCount(5);
+  await expect(page.getByRole("button",{name:"载入演示对话",exact:true})).toBeDisabled();
+  await capture("live-1440-zh",1440,900);
+  await page.getByLabel("Language / 语言").selectOption("en");
+  await capture("live-1920-en",1920,1080);
+  await page.getByRole("button",{name:"Create image / GIF",exact:true}).click();
+  await page.getByLabel("Creative intent",{exact:true}).fill("An original geometric greeting for a fictional hackathon.");
+  await page.getByRole("button",{name:"Prepare exact creative brief",exact:true}).click();
+  const creative=page.getByRole("region",{name:"Exact creative request"});
+  await expect(creative).toContainText("your-image-deployment");
+  await expect(creative.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Generate with real AI (billed)",exact:true})).toBeEnabled();
+  await expect(page.getByTestId("generation-readiness")).not.toContainText("remaining");
+  await capture("live-1440-create-en",1440,900);
+  await page.getByLabel("Creative description",{exact:true}).fill("One circle and one square; no text.");
+  await expect(creative).toHaveCount(0);
+  await page.getByRole("button",{name:"Express",exact:true}).click();
+  await page.getByLabel("Intent or question",{exact:true}).fill("Offer warm encouragement to the fictional team.");
+  await page.getByRole("button",{name:"Preview model request",exact:true}).click();
+  await expect(page.getByRole("region",{name:"Transmission preview"}).getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Run real AI (billed)",exact:true})).toBeEnabled();
+  await page.getByTestId("chat-message").first().getByRole("button",{name:"Explain",exact:true}).click();
+  await page.getByRole("button",{name:"Preview model request",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Run real AI (billed)",exact:true})).toBeEnabled();
+  await capture("live-768-review-en",768,900);
+  await page.getByRole("button",{name:"Hide AI panel",exact:true}).click();
+  await page.getByLabel("Language / 语言").selectOption("zh-CN");
+  await capture("live-320-chat-zh",320,900);
+  await page.getByRole("button",{name:"创作图片 / GIF",exact:true}).click();
+  await page.getByLabel("创作意图",{exact:true}).fill("虚构团队的原创几何问候图");
+  await page.getByRole("button",{name:"准备确切创作简报",exact:true}).click();
+  await expect(page.getByRole("button",{name:"使用真实 AI 生成（计费）",exact:true})).toBeEnabled();
+  await capture("live-320-create-zh",320,900);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button",{name:"创作图片 / GIF",exact:true})).toBeFocused();
+  await page.getByRole("navigation",{name:"应用导航"}).getByRole("button",{name:"素材",exact:true}).click();
+  await expect(page.getByRole("region",{name:"本地素材审阅"}).locator("article")).toHaveCount(8);
+  await expect(page.getByRole("region",{name:"本地素材审阅"}).getByRole("checkbox")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(paidRoutes).toBe(0);expect(errors).toEqual([]);passed=true;
+}finally{
+  const state=await owned.close().finally(async()=>{await context.close();await browser.close();});
+  if(passed)expect(state.closed).toBe(true);
+  const report={recordedAt:new Date().toISOString(),origin,passed,paidRoutes,mocked:false,ownRoomClosed:state.closed,screenshots,...state};
+  await writeFile(resolve(".local","visual-context","local-studio-ui-smoke.json"),JSON.stringify(report,null,2)+"\n");
+  process.stdout.write(JSON.stringify(report,null,2)+"\n");
+}

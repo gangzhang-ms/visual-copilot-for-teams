@@ -1,0 +1,8 @@
+.message-visual { margin-block: 8px; max-width: 100%; }
+.message-visual .message-visual-trigger { display: block; padding: 0; border: 0; background: transparent; max-width: 100%; }
+.message-visual .message-visual-image { display: block; height: auto; max-width: 100%; object-fit: contain; }
+.message-visual-trigger:focus-visible { outline: 3px solid #373879; outline-offset: 3px; }
+.inline-explanation-details { max-width: 100%; overflow-wrap: anywhere; }
+.inline-explanation-details ul { padding-inline-start: 20px; }
+.inline-explanation-details h3 { font-size: 14px; }
+.inline-emoji-explanation .explanation-background { display: block; -webkit-line-clamp: unset; overflow: visible; }

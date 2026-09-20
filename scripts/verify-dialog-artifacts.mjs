@@ -1,0 +1,15 @@
+import { readFile, readdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { buildRoot } from "./build-root.mjs";
+const root = resolve(import.meta.dirname, "..");
+const files = await readdir(resolve(buildRoot, "client"));
+if (files.some((name) => name.toLowerCase().startsWith("dialog") && name.endsWith(".html"))) throw new Error("Vite must not generate dialog HTML.");
+const entry = await readFile(resolve(buildRoot, "client/assets/dialog-entry.js"), "utf8");
+if (!entry || /sourceMappingURL/.test(entry)) throw new Error("Stable dialog entry artifact invalid.");
+await readFile(resolve(buildRoot, "client/assets/dialog.css"));
+const auth = await readFile(resolve(buildRoot, "client/assets/auth-entry.js"), "utf8");
+if (!auth || /sourceMappingURL/.test(auth)) throw new Error("Auth popup artifact invalid.");
+await readFile(resolve(buildRoot, "server/media-worker.js"));
+const index = await readFile(resolve(buildRoot, "client/index.html"), "utf8");
+if (/(modulepreload|prefetch|preload)/i.test(index)) throw new Error("Preload artifacts are forbidden.");
+console.log("Dialog build artifacts validated.");

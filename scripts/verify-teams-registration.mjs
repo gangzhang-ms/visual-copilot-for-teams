@@ -1,0 +1,13 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+const [configPath, snapshotPath] = process.argv.slice(2);
+if (!configPath || !snapshotPath) throw new Error("Usage: node scripts/verify-teams-registration.mjs <config.json> <sanitized-snapshot.json>");
+const config = JSON.parse(await readFile(resolve(configPath), "utf8"));
+const snapshotText = await readFile(resolve(snapshotPath), "utf8");
+if (/(clientSecret|password|authorization|accessToken|refreshToken)/i.test(snapshotText)) throw new Error("Snapshot contains a prohibited secret field.");
+const snapshot = JSON.parse(snapshotText);
+if (snapshot.location !== "teams-managed" || snapshot.azureBotResource !== false) throw new Error("Registration must be Teams-managed without a separate cloud bot resource.");
+for (const key of ["teamsAppId", "botAppId", "tenantId"]) if (!config[key] || snapshot[key] !== config[key]) throw new Error(`${key} registration drift.`);
+if (snapshot.endpoint !== `${config.publicOrigin}/api/messages`) throw new Error("Messaging endpoint drift.");
+if (!snapshot.teamsCliVersion || !snapshot.teamsAppsSdkVersion) throw new Error("Sanitized tool-version evidence is required.");
+console.log("Sanitized Teams-managed registration snapshot matches local non-secret configuration.");

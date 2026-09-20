@@ -1,0 +1,5 @@
+.emoji-enlargement { margin-block: 8px; max-width: 100%; min-width: 0; }
+.emoji-enlargement > summary { display: list-item; list-style-type: disclosure-closed; cursor: pointer; font-size: 14px; font-weight: 600; line-height: 20px; padding: 0; overflow-wrap: anywhere; }
+.emoji-enlargement[open] > summary { list-style-type: disclosure-open; }
+.emoji-enlargement > summary:focus-visible { outline: 3px solid #373879; outline-offset: 3px; }
+.emoji-enlargement-panel { box-sizing: border-box; max-width: 100%; min-width: 0; padding: 8px 0; }
