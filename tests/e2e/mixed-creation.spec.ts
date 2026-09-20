@@ -116,12 +116,14 @@ for(const language of ["en","zh-CN"] as const)test(`mixed options preserve sourc
 });
 test("an existing candidate can be previewed and inserted with zero image calls; reset revokes its ownership",async({page,browser})=>{
   await page.goto(origin+"/chat");
+  await expect(page.getByLabel("Message",{exact:true})).toBeEnabled();
   const review=await api(page,"generation/batch/review",{draft:{...offlineDraft(),intent:"Thanks for the teamwork"},draftRevision:0,count:3,referenceMode:"popular-text"});
   expect(review.status).toBe(200);expect(review.value.existing.status).toBe("ready");expect(calls).toHaveLength(0);
   const {batchId,digest,existing}=review.value;
   const preview=await api(page,"generation/batch/source/preview",{batchId,digest,caption:"Thanks!","speaker":"Alex"});
   expect(preview.status).toBe(200);
   const foreign=await browser.newContext(),other=await foreign.newPage();await other.goto(origin+"/chat");
+  await expect(other.getByLabel("Message",{exact:true})).toBeEnabled();
   expect((await api(other,"generation/batch/source/insert",{handle:preview.value.handle})).status).toBe(400);
   expect((await other.request.get(origin+existing.visual.imageUrl)).status()).not.toBe(200);await foreign.close();
   expect((await api(page,"generation/batch/source/insert",{handle:preview.value.handle})).status).toBe(200);
