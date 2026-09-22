@@ -2,6 +2,12 @@ import type { FailureCode } from "../shared/types";
 export class VisualError extends Error {
   constructor(readonly code: FailureCode) { super(code); }
 }
+export class PlanningSchemaError extends VisualError {
+  constructor(readonly issues:import("../shared/local-chat").PlanningSchemaIssue[]){super("model-output-invalid-schema");}
+}
+export class PlanningEvidenceError extends VisualError {
+  constructor(readonly issues:import("../shared/local-chat").PlanningSchemaIssue[]){super("model-output-invalid-references");}
+}
 export class ModelRequestEnvelopeError extends VisualError {
   constructor(readonly actualBytes:number,readonly allowedBytes:number){super("model-request-envelope-exceeded");}
 }

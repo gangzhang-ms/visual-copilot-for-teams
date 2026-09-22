@@ -25,3 +25,8 @@ it.each(["en","zh-CN"] as const)("starts creation with neutral choices, one desc
   expect(html).toContain(language==="en"?"Sherlock Holmes":"福尔摩斯");
   expect(html).not.toContain("studio-preferences");
 });
+it.each(["en","zh-CN"] as const)("contextual mode invites an intent without forcing a character name in %s",language=>{
+  const html=renderToStaticMarkup(<UnifiedExpression contextual value={emptyExpression()} creating language={language} disabled={false} onChange={()=>{}} onMode={()=>{}} onReload={()=>{}}/>);
+  expect(html).toContain(language==="en"?"No character name is required":"不必指定角色名");
+  expect(html).not.toContain("Sherlock Holmes");
+});

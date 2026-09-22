@@ -29,6 +29,16 @@ credentials, approval and billing.
   selected visual's photographic, illustrated or rendered medium unless an
   explicit new style is requested. This behavior has offline unit/browser
   coverage; it has not received new live image-quality acceptance.
+- **Ground contextual callbacks:** use the current conversation, an explicitly
+  chosen reference or bounded visual evidence when a reference fits. Technical
+  metaphors, wordplay, fictional works and ordinary replies share one constrained
+  planner; there is no movie-specific route. Source identity and photographic
+  style have separate evidence. A suggested caption remains editable text beside
+  the generated image, not an instruction to draw lettering into it.
+- **Observe room updates:** visible tabs poll their current local room without
+  making provider calls. An optional anonymous Chat ID demo allows independent
+  browser profiles to join the same in-memory room. It is **not authentication**
+  or production collaboration; see [room modes and limits](docs/contextual-rooms.md).
 
 AI explanations are uncertain interpretations, not verified facts about a
 person's intentions or a visual's origin. An AI-generated interpretation is
@@ -157,14 +167,17 @@ for your own environment before enabling it.
 4. Build the current local-chat variant and run it on an unused loopback port:
 
    ```powershell
-   $env:VISUAL_BUILD_ROOT = "dist-chat-style-continuity"
+   $env:VISUAL_BUILD_ROOT = "dist-chat-film-context"
    npm run build
    Remove-Item Env:VISUAL_BUILD_ROOT
-   npm run chat:style-continuity
+   npm run chat:contextual-callback
    ```
 
    The launcher prints its URL. Do not rebuild an output root while another
    process is serving it. Stop your own instance before rebuilding that root.
+   The current aliases are `chat:contextual-callback` (4372),
+   `chat:live-sync` (4373) and the opt-in `chat:shared-demo` (4374). Each requires
+   its matching build root; [the room guide](docs/contextual-rooms.md) lists them.
 5. Optional `npm run serpapi:setup` and `npm run web-search:setup` prompt for
    search keys using the same local protected-storage boundary. The current
    variant uses SerpApi when configured; other historical variants use

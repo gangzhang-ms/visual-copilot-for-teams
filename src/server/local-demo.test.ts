@@ -3,10 +3,17 @@ import {readFile} from "node:fs/promises";
 import {resolve} from "node:path";
 import {createHash} from "node:crypto";
 import sharp from "sharp";
-import {localDemo} from "./local-demo";
+import {localDemo,combinedDemoTimes} from "./local-demo";
 import {LOCAL_CONTEXT_LIMIT} from "../shared/local-context";
 
 describe("contextual local demo",()=>{
+  it.each([9,15])("assigns only the combined fixture its nine illustrative times, before the current %s:00 clock",hour=>{
+    const now=new Date(2026,8,22,hour,0,0),times=combinedDemoTimes(now);
+    expect(times.map(time=>new Date(time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})))
+      .toEqual(["11:42","11:43","11:44","11:47","11:48","11:49","12:02","12:03","12:04"]);
+    expect(new Set(times).size).toBe(9);expect(times.at(-1)).toBeLessThanOrEqual(now.getTime());
+    expect(new Date(times[0]).getDate()).toBe(hour<12?21:22);
+  });
   for(const language of ["en","zh-CN"] as const)it(`${language} combines the same owned media into one coherent nine-message thread`,async()=>{
     const combined=await localDemo(language,"combined"),film=await localDemo(language,"film"),emoji=await localDemo(language,"emoji");
     expect(combined).toHaveLength(9);expect(combined.length).toBeLessThanOrEqual(LOCAL_CONTEXT_LIMIT);

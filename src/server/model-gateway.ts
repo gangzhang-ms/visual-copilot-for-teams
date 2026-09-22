@@ -4,7 +4,7 @@ import { digest } from "./analysis-session";
 import { boundedBody, type Transport } from "./graph-context";
 import type { ExecutionScope, ModelProfile, VisualConfig } from "./visual-config";
 import { validProfile,modelRequestLimit } from "./visual-config";
-import { requireVisual, VisualError,ModelRequestEnvelopeError } from "./visual-errors";
+import { requireVisual, VisualError,ModelRequestEnvelopeError,PlanningSchemaError } from "./visual-errors";
 import { plain } from "./visual-retrieval";
 import {validSpeakerContext} from "../shared/expression";
 import {explanationKeys,explanationLimits,explanationResponseFormat,structuredExplanationInstruction,explanationBriefInstruction,explanationReferenceCounts,explanationReferenceIds} from "./explanation-contract";
@@ -154,6 +154,9 @@ export class ModelGateway {
           && choice.message.function_call==null, "model-output-invalid-envelope");
         stage="json";const output = JSON.parse(choice.message.content);
         requireVisual(!output?.refused, "model-refused");
+        if(payload.task==="plan-contextual-expression"&&(!output||typeof output!=="object"||Array.isArray(output)))
+          throw new PlanningSchemaError([{field:"$",rule:"type",actualType:output===null?"null":Array.isArray(output)?"array":
+            typeof output==="string"?"string":typeof output==="number"?"number":typeof output==="boolean"?"boolean":"other"}]);
         requireVisual(output&&typeof output==="object"&&!Array.isArray(output),"model-output-invalid-schema");
         stage="decoded";
         if(payload.task==="explain")diagnostic.references=explanationReferenceCounts(output,payload.frames.map((f:{id:string})=>f.id),payload.context.map((c:{label:string})=>c.label));

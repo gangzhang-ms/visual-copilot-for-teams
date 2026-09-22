@@ -4,10 +4,11 @@ import type {LocalState} from "../shared/local-chat";
 import type {EmojiExpressionDraft,EmojiSuggestions} from "../shared/emoji-expression";
 import {emojiInsertion} from "../shared/emoji-expression";
 import type {ExpressionDraft} from "./UnifiedExpression";
-import {localRequest} from "./local-chat-api";
+import {localRequest,beginLocalWork,ensureLocalSpeaker} from "./local-chat-api";
 import {friendlyLocalError} from "./friendly-local-error";
-export function LocalEmojiExpression({room,common,language,replyTo,blocked,onReply,onState,onWork,onInsert}:{
+export function LocalEmojiExpression({room,common,language,replyTo,blocked,speaker,onReply,onState,onWork,onInsert}:{
   room:LocalState;common:ExpressionDraft;language:Language;replyTo:string|null;blocked:boolean;
+  speaker:string;
   onReply:(id:string|null)=>void;onState:(state:LocalState)=>void;onWork:()=>void;onInsert:(text:string)=>void;
 }){
   const t=(en:string,zh:string)=>language==="en"?en:zh;
@@ -22,10 +23,13 @@ export function LocalEmojiExpression({room,common,language,replyTo,blocked,onRep
   const fresh=(id:number,sig:string)=>alive.current&&epoch.current===id&&signatureRef.current===sig;
   async function run(){
     if(flight.current)return;
+    const finish=beginLocalWork();
     cancel();const id=epoch.current,sig=signatureRef.current,c=new AbortController();controller.current=c;
     flight.current=true;setRunning(true);setError("");onWork();
     try{
-      const current=await localRequest<LocalState>("state",{},c.signal);
+      let current=await localRequest<LocalState>("state",{},c.signal);
+      if(!fresh(id,sig))return;
+      current=await ensureLocalSpeaker(current,speaker,c.signal);
       if(!fresh(id,sig))return;
       acceptedRevision.current=current.revision;onState(current);
       const draft:EmojiExpressionDraft={intent:common.intent,language,replyTo,preferences:common.preferences,
@@ -45,10 +49,12 @@ export function LocalEmojiExpression({room,common,language,replyTo,blocked,onRep
         }}
         catch(e){if(fresh(id,sig))setError(e instanceof Error?e.message:"auth-required");}
       }
+      finish();
     }
   }
   async function insert(){
     if(!suggestions||selected===undefined||flight.current)return;
+    const finish=beginLocalWork();
     const id=epoch.current,sig=signatureRef.current,c=new AbortController();controller.current=c;flight.current=true;setRunning(true);setError("");
     try{
       const value=await localRequest<{text:string}>("emoji/selection",{revision:suggestions.revision,id:suggestions.id,
@@ -56,7 +62,7 @@ export function LocalEmojiExpression({room,common,language,replyTo,blocked,onRep
       if(!fresh(id,sig))return;
       onInsert(value.text);setSuggestions(undefined);setSelected(undefined);setInserted(true);
     }catch(e){if(fresh(id,sig)&&!c.signal.aborted)setError(e instanceof Error?e.message:"processing-review-required");}
-    finally{flight.current=false;if(alive.current)setRunning(false);}
+    finally{finish();flight.current=false;if(alive.current)setRunning(false);}
   }
   return <section className="emoji-expression" aria-label={t("Emoji expression","Emoji 表达")}>
     <p>{t("Unicode text only. Uses selected message text and emoji, not picture pixels. No image search or generation.","仅生成 Unicode 文字表情，使用所选消息的文字和 emoji，不分析图片像素，也不搜索或生成图片。")}</p>

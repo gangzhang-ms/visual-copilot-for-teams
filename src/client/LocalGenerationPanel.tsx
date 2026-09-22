@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Language } from "../shared/types";
 import type { CreationChoice, ExistingGenerationCandidate, GenerationBatchOptions, GenerationInspiration, LocalGenerationBatch, LocalGenerationBatchReview, LocalGeneratedInsertPreview, LocalGeneratedVisual, LocalGenerationDraft, LocalGenerationReview, LocalGenerationStatus, LocalInsertPreview, LocalState } from "../shared/local-chat";
+import {localOutputCaptionLimit} from "../shared/local-chat";
 import {PublicArtwork,PublicNotices} from "./LocalPublicVisual";
-import { localRequest } from "./local-chat-api";
+import { localRequest,LocalRequestError,beginLocalWork,ensureLocalSpeaker } from "./local-chat-api";
 import {expressionStyles,replyVisualStyles,type ExpressionOptions} from "../shared/expression";
 import {friendlyLocalError} from "./friendly-local-error";
 import {emptyCreativeDraft,sharedCreativeDraft,type ExpressionDraft} from "./UnifiedExpression";
@@ -66,12 +67,17 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
   const contexts=()=>room.messages.slice(-12).map(m=>({label:m.id,text:`${m.speaker}: ${m.text}`.slice(0,2000),included:false}));
   const [localDraft,setDraft]=useState<LocalGenerationDraft>({intent:"",creative:"",output:"image",context:contexts(),expression:{style:"reaction-sticker",intensity:"balanced",reference:""},
     preferences:{source:"requester-reported",language,culture:"",familiarity:"",tone:"",relationship:"",humor:"",avoid:""}});
-  const draft=shared?sharedCreativeDraft(shared.options,shared.common,language):localDraft;
+  const sourceDraft=shared?sharedCreativeDraft(shared.options,shared.common,language):localDraft;
+  const draft=room.contextualCreation&&sourceDraft.expression&&sourceDraft.expression.culturalMode===undefined
+    ?{...sourceDraft,expression:{...sourceDraft.expression,culturalMode:sourceDraft.expression.reference.trim()?"explicit" as const:"follow-conversation" as const}}
+    :sourceDraft;
   const [review,setReview]=useState<LocalGenerationReview>(),[operation,setOperation]=useState<LocalGenerationStatus>();
   const [batch,setBatch]=useState<LocalGenerationBatch>(),[localBatchOptions,setLocalBatchOptions]=useState<GenerationBatchOptions>({count:3,referenceMode:"popular-text"});
   const batchOptions=shared?.batchOptions??localBatchOptions,{count,referenceMode}=batchOptions;
   const setBatchOptions=(value:GenerationBatchOptions)=>shared?.onBatchOptions?shared.onBatchOptions(value):setLocalBatchOptions(value);
   const [consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const [planningReason,setPlanningReason]=useState<LocalRequestError["planningReason"]>();
+  const [planningIssues,setPlanningIssues]=useState<LocalRequestError["planningIssues"]>();
   const [variant,setVariant]=useState<"image"|"animation">("image"),[caption,setCaption]=useState(""),[alt,setAlt]=useState("");
   const [checked,setChecked]=useState(false),[preview,setPreview]=useState<LocalGeneratedInsertPreview>();
   const [selectedExisting,setSelectedExisting]=useState<Extract<ExistingGenerationCandidate,{status:"ready"}>>();
@@ -91,10 +97,11 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
   useLayoutEffect(()=>{if(shared)clear();},[shared?.common.version]);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;epoch.current++;controller.current?.abort();};},[]);
   async function work(run:(signal:AbortSignal,id:number)=>Promise<void>) {
+    const finish=beginLocalWork();
     shared?.onWork();
-    const id=++epoch.current,c=new AbortController();controller.current=c;setBusy(true);setError("");
-    try {await run(c.signal,id);} catch(e) {if(fresh(id)&&!c.signal.aborted)setError(e instanceof Error?e.message:"generation-failed");}
-    finally {if(fresh(id)){setBusy(false);if(controller.current===c)controller.current=undefined;}}
+    const id=++epoch.current,c=new AbortController();controller.current=c;setBusy(true);setError("");setPlanningReason(undefined);setPlanningIssues(undefined);
+    try {await run(c.signal,id);} catch(e) {if(fresh(id)&&!c.signal.aborted){setError(e instanceof Error?e.message:"generation-failed");setPlanningReason(e instanceof LocalRequestError?e.planningReason:undefined);setPlanningIssues(e instanceof LocalRequestError?e.planningIssues:undefined);}}
+    finally {finish();if(fresh(id)){setBusy(false);if(controller.current===c)controller.current=undefined;}}
   }
   function revoke() {
     const needsCancel=!!review||!!operation||!!batch||busy;
@@ -125,7 +132,8 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
     await cancelQueue.current;
     if(!fresh(requestedEpoch))return;
     void work(async(signal,id)=>{
-      const latest=await localRequest<LocalState>("state",{},signal);if(!fresh(id))return;adopt(latest);
+      let latest=await localRequest<LocalState>("state",{},signal);if(!fresh(id))return;
+      latest=await ensureLocalSpeaker(latest,speaker,signal);if(!fresh(id))return;adopt(latest);
       const submitted=structuredClone({...draft,preferences:{...draft.preferences,language}});
       const value=await localRequest<LocalGenerationReview>("generation/review",{revision:roomRef.current.revision,draftRevision:draftRevision.current,draft:submitted},signal);
       if(!fresh(id))return;adopt({...roomRef.current,revision:value.revision});setReview(value);
@@ -175,8 +183,9 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
       await cancelQueue.current;
       if(!fresh(requestedEpoch)||cancellationFailure.current===requestedEpoch)return;
       await work(async(signal,id)=>{
-        const latest=await localRequest<LocalState>("state",{},signal);if(!fresh(id))return;
+        let latest=await localRequest<LocalState>("state",{},signal);if(!fresh(id))return;
         if(latest.revision!==roomRef.current.revision){adopt(latest);throw new Error("generation-stale");}
+        latest=await ensureLocalSpeaker(latest,speaker,signal);if(!fresh(id))return;adopt(latest);
         if(choices){
           let value:LocalGenerationBatchReview;
           try{value=await localRequest<LocalGenerationBatchReview>("generation/batch/review",{revision:latest.revision,draftRevision:draftRevision.current,draft:submitted,count,referenceMode:referenceOverride??referenceMode},signal);}
@@ -237,7 +246,7 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
     draft.expression?.reference?t(`Reference: ${draft.expression.reference.slice(0,36)}`,`参考：${draft.expression.reference.slice(0,36)}`):"",
     ["culture","familiarity","tone","relationship","humor","avoid"].some(k=>draft.preferences[k as keyof typeof draft.preferences])?t("Audience preferences","受众偏好"):"",
     draft.context.some(c=>c.included)?t(`${draft.context.filter(c=>c.included).length} context messages`,`${draft.context.filter(c=>c.included).length} 条上下文`):"",
-    room.speakerProfiles?.some(p=>p.speaker===(room.outgoingSpeaker??speaker))?t("Saved speaker preferences","已保存的发言者偏好"):""
+    room.speakerProfiles?.some(p=>p.speaker===speaker)?t("Saved speaker preferences","已保存的发言者偏好"):""
   ].filter(Boolean);
   const outputPicker=<label>{t("Requested output","期望输出")}<select aria-label={t("Requested output","期望输出")} value={draft.output} onChange={e=>edit({output:e.target.value==="gif"?"gif":"image"})}>
     <option value="image">{simple?t("Image","图片"):t("New still image","新静态图片")}</option><option value="gif">{simple?"GIF":t("New still + local animated GIF","新静图 + 本地 GIF 动画")}</option></select></label>;
@@ -255,7 +264,7 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
       {(!simple||draft.output==="gif")&&<p>{direct?t("GIF adds gentle movement to a still image, not new character actions or a video.","GIF 为静图添加轻微动态，不会生成新的角色动作或视频。"):t("GIF means a generated still animated with local pan/zoom, not new actions or video. Existing Explain and Express remain separate.","GIF 是生成静图的本地平移缩放动画，不是生成动作或视频。现有解释与表达功能保持独立。")}</p>}</div>
     {!shared&&<label>{t("Creative intent","创作意图")}<textarea aria-label={t("Creative intent","创作意图")} maxLength={2000} value={draft.intent} onChange={e=>edit({intent:e.target.value})} placeholder={t("A warm welcome for a fictional puzzle team","为虚构的解谜小队送上温暖欢迎")} /></label>}
     {simple&&outputPicker}
-    {room.contextualCreation&&<p className="local-muted">{t("Create matches up to two owned conversation frames in Azure. Only public fictional names and reaction keywords go to SerpApi, not your chat or images. Generation receives the resulting text direction, not reference pixels.","点击创建时，Azure 会参考最多两个已拥有的聊天画面。仅公开虚构角色名与反应词发送给 SerpApi，不发送聊天或图片。图像生成接收提炼后的文字方向，而非参考像素。")}</p>}
+    {room.contextualCreation&&<p className="local-muted">{t("One Azure planning request reads your reviewed chat, up to two owned frames, prior source explanations and voluntary preferences. Image generation receives text direction, not reference pixels. Web search runs only when enabled for three options.","一次 Azure 规划请求读取已审阅的聊天、最多两个已拥有的画面、已有来源解释与自愿偏好。图像生成仅接收文字方向，不接收参考像素。仅在三方案且开启搜索时运行网络搜索。")}</p>}
     <CreationOptions simple={simple} summary={<>{t("More options (optional)","更多选项（可选）")}{choiceSummary.length>0&&<span className="creation-option-summary">{choiceSummary.join(" · ")}</span>}</>}>
     {mixed&&creationInfo}
     {choices&&<><label>{t("Number of options","方案数量")}<select aria-label={t("Number of options","方案数量")} value={count} onChange={e=>{revoke();setBatchOptions({...batchOptions,count:e.target.value==="1"?1:3});}}>
@@ -269,6 +278,12 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
       <option value="">{t("Automatic: relevant recent incoming visuals","自动：最近相关的来图")}</option>
       {room.messages.filter(m=>(m.attachment||m.visual||m.generated)&&draft.context.some(c=>c.included&&c.label===m.id)).map(m=><option key={m.id} value={m.id}>{m.speaker}: {m.text.slice(0,70)||t("Image","图片")}</option>)}
     </select></label>}
+    {room.contextualCreation&&<><label>{t("Contextual callback","接梗方式")}<select aria-label={t("Contextual callback","接梗方式")} value={draft.expression?.culturalMode??"follow-conversation"} onChange={e=>edit({expression:{...draft.expression!,reference:e.target.value==="explicit"?draft.expression?.reference??"":"",culturalMode:e.target.value as ExpressionOptions["culturalMode"]}})}>
+      <option value="follow-conversation">{t("Follow context when fitting","合适时接梗")}</option>
+      <option value="original">{t("Plain / original reply","普通／原创回复")}</option>
+      <option value="explicit">{t("Use my reference override","使用我指定的参考")}</option>
+    </select></label>
+    {draft.expression?.culturalMode==="explicit"&&<label>{t("Reference override","指定参考")}<input aria-label={t("Reference override","指定参考")} maxLength={400} value={draft.expression.reference} onChange={e=>edit({expression:{...draft.expression!,reference:e.target.value}})}/></label>}</>}
     <label>{simple?t("Additional details (optional)","补充细节（可选）"):t("Creative description","创作描述")}<textarea aria-label={t("Creative description","创作描述")} maxLength={2000} value={draft.creative} onChange={e=>edit({creative:e.target.value})} placeholder={t("Who or what, expression, gesture, a simple situation; optional","主体、表情、动作与简洁场景，可选")} /></label>
     <label>{t("Expression style","表达风格")}<select aria-label={t("Expression style","表达风格")} value={draft.expression?.style} onChange={e=>edit({expression:{...draft.expression!,style:e.target.value as ExpressionOptions["style"]}})}>
       {expressionStyles.map(s=><option key={s.id} value={s.id}>{room.contextualCreation&&s.id==="auto"?t("Match reply context","匹配回复上下文"):language==="en"?s.en:s.zh}</option>)}</select></label>
@@ -282,7 +297,7 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
     {!simple&&outputPicker}
     <details className="studio-preferences"><summary>{t("Culture & style (optional)","文化与风格（可选）")}</summary>
     <p>{t("Additional requester / intended-audience preferences, separate from the speaker report above. Leave unknowns blank.","额外的请求者／目标受众偏好，与上方发言者报告分开。未知项留空。")}</p>
-    <label>{t("Textual reference idea","文字参考灵感")}<input maxLength={400} value={draft.expression?.reference??""} onChange={e=>edit({expression:{...draft.expression!,reference:e.target.value}})} placeholder={t("e.g. the quietly relieved reaction, in an original scene","例如：终于松了一口气的反应，用原创场景表达")}/></label>
+    {!room.contextualCreation&&<label>{t("Textual reference idea","文字参考灵感")}<input maxLength={400} value={draft.expression?.reference??""} onChange={e=>edit({expression:{...draft.expression!,reference:e.target.value}})} placeholder={t("e.g. the quietly relieved reaction, in an original scene","例如：终于松了一口气的反应，用原创场景表达")}/></label>}
     {(["culture","familiarity","tone","relationship","humor","avoid"] as const).map((key,i)=>shared&&key!=="culture"?null:<label key={key}>{t(["Culture / language context","Familiarity","Tone","Relationship","Humor","Avoid"][i],["文化 / 语言背景","熟悉程度","语气","关系","幽默","避免内容"][i])}
       <input maxLength={300} value={draft.preferences[key]} onChange={e=>edit({preferences:{...draft.preferences,[key]:e.target.value}})} /></label>)}
     </details>
@@ -297,12 +312,14 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
     {simple&&<><button type="button" disabled={busy||shared?.blocked} onClick={()=>{edit({...emptyCreativeDraft(language),output:draft.output});shared?.onReset();}}>{t("Reset optional choices","重置可选设置")}</button>
       <p className="local-muted">{t("Keeps your description and output; saved speaker profiles are not deleted.","保留主描述和输出类型，不删除已保存的发言者偏好。")}</p></>}
     </CreationOptions>
-    {direct?<><button className="local-primary" disabled={busy||shared?.blocked||unresolved||!draft.intent.trim()||!room.revision||!room.generation?.ready} onClick={()=>void createDirect()}>
+    {direct?<><button className="local-primary" disabled={busy||shared?.blocked||unresolved||!draft.intent.trim()||draft.expression?.culturalMode==="explicit"&&!draft.expression.reference.trim()||!room.revision||!room.generation?.ready} onClick={()=>void createDirect()}>
       {mixed?t(`Create ${count===3&&referenceMode==="none"?2:count} option${count===1?"":"s"}`,`创建 ${count===3&&referenceMode==="none"?2:count} 个方案`):choices?t(`Generate ${count} ${draft.output==="gif"?"GIF ":""}option${count===1?"":"s"}`,`生成 ${count} 个${draft.output==="gif"?" GIF":""}方案`):draft.output==="gif"?t("Generate GIF","生成 GIF"):t("Generate image","生成图片")}</button>
       {(busy||unresolved)&&<button className="local-secondary" onClick={revoke}>{t("Cancel generation","取消生成")}</button>}
       <p className="local-muted">{mixed?t("Inspect and insert manually; nothing is posted automatically.","检查后手动插入，不会自动发送。"):t("Your click uses the current text and options. Inspect the result before inserting it; nothing is posted automatically.","点击即使用当前文字和选项开始生成。请检查结果后再手动插入，不会自动发送。")}</p></>:
       <button className="local-primary" disabled={busy||!draft.intent.trim()||!room.revision} onClick={()=>void prepare()}>{t("Prepare exact creative brief","准备确切创作简报")}</button>}
-    {error&&<div role="alert" className="local-error">{direct?friendlyLocalError(error,language):`${t("Operation blocked; nothing inserted. Check the status before a new attempt.","操作已阻止，没有插入内容。再次尝试前请查看状态。")} ${error}`}</div>}
+    {error&&<div role="alert" className="local-error">{direct?friendlyLocalError(error,language):`${t("Operation blocked; nothing inserted. Check the status before a new attempt.","操作已阻止，没有插入内容。再次尝试前请查看状态。")} ${error}`}
+      {error==="generation-context-planning"&&planningReason&&<p>{t("Planner diagnostic","规划诊断")}: {planningReason}
+        {planningIssues?.map(issue=><span key={issue.field}>{` · ${issue.field}: ${issue.actualType} / ${issue.rule}${issue.actualLength!==undefined?` (${issue.actualLength} > ${issue.limit})`:""}`}</span>)}</p>}</div>}
     {mixed?<p className="creation-summary">{count===3&&referenceMode==="popular-text"?t("1 existing image with editable caption + 2 AI-generated options.","1 张现成图（配文可改）+ 2 个 AI 生成方案。"):t(`${imageRequestCount} AI-generated option${imageRequestCount===1?"":"s"}.`,`${imageRequestCount} 个 AI 生成方案。`)}
       {room.semanticCreation&&count===3&&referenceMode==="popular-text"&&t(" Includes one AI-assisted image search."," 含 1 次 AI 辅助选图。")}</p>:creationInfo}
     {serp&&count===3&&referenceMode==="popular-text"&&<p className="local-muted">{t("Google Images via SerpApi · search keywords may be sent externally.","通过 SerpApi 搜索 Google 图片 · 搜索词可能发送至外部服务。")}{batch?.existing?.searchTerms&&<> {t("Search terms used","已使用搜索词")}: {batch.existing.searchTerms}</>}</p>}
@@ -316,11 +333,23 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
     {batch&&<section className="generation-batch" aria-label={mixed?t("Creation options","创作方案"):t("Generated options","生成方案")}>
       <p role="status">{t(`${cards.filter(c=>c.kind==="existing"?c.status==="ready":c.operation.status==="ready").length} of ${cards.length} ready`,`${cards.length} 个方案中已有 ${cards.filter(c=>c.kind==="existing"?c.status==="ready":c.operation.status==="ready").length} 个就绪`)}</p>
       {batch.inspiration&&<InspirationDetails value={batch.inspiration} language={language}/>}
-      {batch.contextPlan&&<p className="context-match-cue">{t("Matching the conversation: ","匹配对话：")}{batch.contextPlan.franchise??batch.contextPlan.characters[0]??batch.contextPlan.motif}
-        {batch.contextPlan.certainty!=="grounded"?t(" (source uncertain)","（来源不确定）"):batch.contextPlan.mode==="inherit"&&batch.contextPlan.kind!=="fictional"?t(" (no fictional source identified)","（未识别出虚构作品来源）"):""}{batch.contextPlan.mode==="override"&&t(" · your new subject takes priority"," · 优先采用新指定的主体")}</p>}
+      {batch.contextPlan&&<p className="context-match-cue">{t("Matching the conversation: ","匹配对话：")}{batch.contextPlan.hook??batch.contextPlan.franchise??batch.contextPlan.characters[0]??batch.contextPlan.motif}
+        {batch.contextPlan.referenceChoice!=="original"&&batch.contextPlan.certainty!=="grounded"&&t(" (source uncertain)","（来源不确定）")}{batch.contextPlan.mode==="override"&&t(" · your explicit choice takes priority"," · 优先采用明确选择")}</p>}
       {batch.contextPlan&&<p className="context-style-cue">{selectedStyle&&selectedStyle.id!=="auto"?t("Output style: ","输出风格："):t("Reply visual style: ","回复对象风格：")}{selectedStyle&&selectedStyle.id!=="auto"
         ?`${language==="en"?selectedStyle?.en:selectedStyle?.zh} · ${t("explicit choice","明确选择")}`
         :replyVisualStyles.find(style=>style.id===batch.contextPlan!.visualStyle)?.[language==="en"?"en":"zh"]}</p>}
+      {batch.contextPlan&&<section className="context-reference-summary" aria-label={t("Contextual reply plan","上下文回复方案")}>
+        <h4>{t("Contextual reply plan","上下文回复方案")}</h4>
+        <p><b>{t("Context hook","上下文线索")}: </b>{batch.contextPlan.hook??batch.contextPlan.franchise??t("None — ordinary context-fitting reply","无 — 合适的普通回复")}
+          {batch.contextPlan.referenceChoice!=="original"&&batch.contextPlan.certainty!=="grounded"&&t(" · source uncertain"," · 来源不确定")}</p>
+        <p><b>{t("Current reply","当前回复")}: </b>{batch.contextPlan.replyIntent}</p>
+        <p><b>{t("Reference choice","参考选择")}: </b>{t(
+          {"same-source":"Continue a grounded hook","related":"Related grounded reference","original":"Ordinary original reply","explicit":"Explicit override"}[batch.contextPlan.referenceChoice],
+          {"same-source":"延续有依据的线索","related":"有依据的相关参考","original":"普通原创回复","explicit":"明确指定"}[batch.contextPlan.referenceChoice])}
+          {batch.contextPlan.characters.length>0&&` · ${batch.contextPlan.characters.join(" / ")}`} · {batch.contextPlan.reason}</p>
+        {batch.contextPlan.adaptedCaption&&<p><b>{t("New adapted caption — not a source quote","新改编配文 — 并非来源原句")}: </b>{batch.contextPlan.adaptedCaption}</p>}
+        <p className="local-muted">{t("Original AI-created reply, not an original source image. A callback does not establish shared history or audience familiarity.","AI 原创回复，并非来源原图。接梗不代表存在共同经历，也不代表受众熟悉。")}</p>
+      </section>}
       <div className="generation-candidates">{cards.map((candidate,index)=>{
         if(candidate.kind==="existing")return <article className="generation-candidate existing-candidate" key={candidate.id}>
           <h4>{serp?t("Google image + caption","Google 图片配文"):commons?t("Wikimedia image + caption","维基图片配文"):t("Existing image + caption","现成图配文")}</h4>
@@ -345,10 +374,11 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
           {visual&&<><GeneratedArtwork visual={visual} language={language} showDetails={false}/>
             <button aria-pressed={operation?.image?.assetId===value.image?.assetId} onClick={()=>{
               clearPreview();setSelectedExisting(undefined);setOperation(value);setAlt(visual.alt);setVariant(value.animation?"animation":"image");setChecked(false);
+              if(operation?.operationId!==value.operationId)setCaption(batch.contextPlan?.adaptedCaption??"");
             }}>{t("Choose this option","选择此方案")}</button></>}
         </article>;
       })}</div>
-      {mixed&&batch.existing?.status!=="skipped"&&!batch.inspiration&&<p role="status">      {batch.contextPlan?t("Both AI options share the same visual-context direction. Retrieved titles cannot replace that direction; no reference pixels condition generation.","两个 AI 方案使用同一图片上下文方向，检索标题不会替换该方向；生成不接收参考像素。"):web?t("AI options use your description without web image references.","AI 方案使用你的描述，不含网络图片参考。"):t("AI options use your description without meme inspiration.","AI 方案继续使用你的描述，不含热图参考。")}</p>}
+      {mixed&&batch.existing&&batch.existing.status!=="skipped"&&!batch.inspiration&&<p role="status">      {batch.contextPlan?t("Both AI options share the same visual-context direction. Retrieved titles cannot replace that direction; no reference pixels condition generation.","两个 AI 方案使用同一图片上下文方向，检索标题不会替换该方向；生成不接收参考像素。"):web?t("AI options use your description without web image references.","AI 方案使用你的描述，不含网络图片参考。"):t("AI options use your description without meme inspiration.","AI 方案继续使用你的描述，不含热图参考。")}</p>}
       {batch.existing?.status==="failed"&&<button disabled={busy||shared?.blocked} title={t("Retries only image search, never AI image generation.","仅重试选图，不重新生成 AI 图片。")} onClick={()=>void work(async(signal,id)=>{
         const value=await localRequest<LocalGenerationBatch>("generation/batch/source/retry",{revision:roomRef.current.revision,batchId:batch.batchId,digest:batch.digest},signal);
         if(fresh(id))setBatch(value);
@@ -366,7 +396,7 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
       <h4>{selectedExisting.visual.webSource?t("Use web preview + caption","使用网络预览图与配文"):t("Use original image + caption","使用原图与配文")}</h4>
       <p>{selectedExisting.captionOrigin==="manual-required"?t("Your description exceeds 500 characters. Write a shorter caption; it was not truncated.","描述超过 500 字符，请另写较短配文；没有截断原描述。"):
         t("The draft caption is your description verbatim, not AI-written. Edit it for this image.","初始配文直接使用你的描述，不是 AI 撰写；请按图片修改。")}</p>
-      <label>{t("Caption beside image","图片旁的配文")}<textarea aria-label={t("Caption beside image","图片旁的配文")} maxLength={500} value={caption} onChange={e=>{setCaption(e.target.value);clearPreview();}}/></label>
+      <label>{t("Caption beside image","图片旁的配文")}<textarea aria-label={t("Caption beside image","图片旁的配文")} maxLength={localOutputCaptionLimit} value={caption} onChange={e=>{setCaption(e.target.value);clearPreview();}}/></label>
       <button disabled={busy||!caption.trim()} onClick={()=>void work(async(signal,id)=>{
         const ticket=insertionEpoch.current;await cancelQueue.current;if(!fresh(id)||ticket!==insertionEpoch.current)return;
         const pending=localRequest<LocalInsertPreview>("generation/batch/source/preview",{revision:roomRef.current.revision,batchId:batch.batchId,digest:batch.digest,caption,speaker},signal);
@@ -411,7 +441,7 @@ export function LocalGenerationPanel({room,language,speaker,onState,shared}:Prop
             setBatch(batch=>batch?{...batch,candidates:batch.candidates.map(c=>c.operation.image?.assetId===value.image.assetId?{...c,operation:{...c.operation,...value,animationFailed:false,code:undefined}}:c)}:batch);}
         })}>{direct?t("Make an animated GIF","制作 GIF 动图"):t("Animate locally — zero image calls","制作本地动画 — 零图像调用")}</button>}</div>
         {active&&<><GeneratedArtwork visual={active} language={language} showDetails={!direct}/>{direct&&<p>{t("Check the image before sharing. Use only where you have permission.","分享前请检查图片，仅在有使用许可的场景使用。")}</p>}</>}
-        <label>{t("Local output caption","本地输出配文")}<textarea aria-label={t("Local output caption","本地输出配文")} maxLength={500} value={caption} onChange={e=>{setCaption(e.target.value);clearPreview();}}/></label>
+        <label>{t("Local output caption","本地输出配文")}<textarea aria-label={t("Local output caption","本地输出配文")} maxLength={localOutputCaptionLimit} value={caption} onChange={e=>{setCaption(e.target.value);clearPreview();}}/></label>
         <label>{t("Image description / alt text","图片描述 / 替代文字")}<textarea aria-label={t("Image description / alt text","图片描述 / 替代文字")} maxLength={300} value={alt} onChange={e=>{setAlt(e.target.value);clearPreview();}}/></label>
         {!direct&&<label className="local-check"><input type="checkbox" checked={checked} onChange={e=>{setChecked(e.target.checked);clearPreview();}}/>{t("I inspected this output, its meaning and notices for permitted local test use.","我已检查输出、含义和说明，确认可用于本地测试。")}</label>}
         <button className="local-primary" disabled={!active||(!direct&&!checked)||!alt.trim()||!speaker.trim()||busy} onClick={()=>void work(async(signal,id)=>{

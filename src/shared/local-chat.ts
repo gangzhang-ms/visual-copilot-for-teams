@@ -1,11 +1,13 @@
 import type { MediaPreview, ProcessingReview, PublicVisual, ReviewInput } from "./types";
 import type { ExpressionOptions,SpeakerProfile } from "./expression";
+export const localOutputCaptionLimit=500;
 export interface LocalMessage {
   id: string; speaker: string; text: string;
   attachment?: { dataUrl: string; category: "image" | "sticker" | "gif" };
   visual?: PublicVisual;
   generated?: LocalGeneratedVisual;
   createdAt?:number;
+  demoTimeline?:true;
   demoMedia?:"illustration"|"local-motion"|"user-reference"|"custom-emoji";
 }
 export function hasLocalVisual(message:LocalMessage|undefined):boolean {
@@ -25,6 +27,7 @@ export function canExplainLocalMessage(message:LocalMessage|undefined):boolean {
   return !!message&&(hasLocalVisual(message)||containsUnicodeEmoji(message.text));
 }
 export interface LocalState {
+  sharedRoom?:{chatId:string;expiresAt:number};
   emojiExpressions?:true;
   contextualCreation?:true;
   mixedCreation?:true;
@@ -106,10 +109,18 @@ export interface LocalGenerationBatch {
   existing?:ExistingGenerationCandidate;
   cooldownUntil:number;
 }
+export const publicReplyMotifs=["none","train","bridge","path","small step","teamwork","support","rest","celebration","puzzle","balance","storm","fire","waiting","dilemma"] as const;
 export interface ExpressVisualPlan {
+  searchMotif:typeof publicReplyMotifs[number];
+  hook:string|null;
+  referenceChoice:"same-source"|"related"|"original"|"explicit";
+  replyIntent:string;
+  reason:string;
+  adaptedCaption:string|null;
+  familiarity:"unknown"|"mixed"|"familiar"|"unfamiliar";
   observedSources:(string|null)[];
   mode:"inherit"|"override"|"unanchored";
-  kind:"fictional"|"motif"|"none";
+  kind:"fictional"|"callback"|"motif"|"none";
   franchise:string|null;
   characters:string[];
   subject:string;
@@ -120,8 +131,36 @@ export interface ExpressVisualPlan {
   subjectCount:number|null;
   certainty:"grounded"|"uncertain"|"none";
   evidence:string[];
+  visualEvidence?:string[];
   query:string;
   digest:string;
+}
+export const planningFailureReasons=["schema","evidence","truncated","invalid-json","provider","unavailable"] as const;
+export type PlanningFailureReason=typeof planningFailureReasons[number];
+export const planningFields=["adaptedCaption","certainty","characters","evidence","familiarity","franchise","hook","kind","medium","mode","motif",
+  "observedSources","reaction","reason","referenceChoice","replyIntent","searchMotif","subject","subjectCount","visualStyle"] as const;
+export const planningIssueFields=["$",...planningFields,"query","reference","reference.kind","reference.choice","reference.sourceId","reference.work","reference.characters","reference.hook","appearance","appearance.style","appearance.frameId"] as const;
+export const planningIssueTypes=["missing","null","array","object","string","number","boolean","other"] as const;
+export const planningIssueRules=["type","missing","unexpected-fields","enum","empty","length","format","range","items","query",
+  "audience-report-required","frame-count","source-name","unique-evidence","available-evidence","frame-evidence-required",
+  "original-mode","explicit-mode","hook-kind","fictional-name-required","grounded-required","source-evidence-required",
+  "explicit-reference-required","fictional-choice","inheritance-evidence","nonfictional-names","reference-choice","reference-mode","unanchored-reference"] as const;
+export interface PlanningSchemaIssue {
+  field:typeof planningIssueFields[number];
+  actualType:typeof planningIssueTypes[number];
+  rule:typeof planningIssueRules[number];
+  actualLength?:number;
+  limit?:number;
+}
+export function validPlanningSchemaIssue(value:unknown):value is PlanningSchemaIssue{
+  if(!value||typeof value!=="object"||Array.isArray(value))return false;
+  const v=value as Record<string,unknown>;
+  const keys=Object.keys(v).sort().join(",");
+  const measured=keys==="actualLength,actualType,field,limit,rule"&&v.rule==="length"&&v.actualType==="string"
+    &&typeof v.actualLength==="number"&&Number.isSafeInteger(v.actualLength)&&v.actualLength<=64_000
+    &&typeof v.limit==="number"&&Number.isSafeInteger(v.limit)&&v.limit>=0&&v.limit<=64_000&&v.actualLength>v.limit;
+  return (keys==="actualType,field,rule"||measured)
+    &&planningIssueFields.some(field=>field===v.field)&&planningIssueTypes.some(type=>type===v.actualType)&&planningIssueRules.some(rule=>rule===v.rule);
 }
 export interface LocalGenerationBatchReview extends LocalGenerationBatch {
   requests:LocalGenerationReview[];

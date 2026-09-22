@@ -2,7 +2,10 @@ import { Fragment,useEffect, useRef, useState } from "react";
 import type { AnalysisResult, ContextSnippet, Language, ReviewInput } from "../shared/types";
 import type { GenerationBatchOptions, LocalCatalogReview, LocalInsertPreview, LocalMessage, LocalReview, LocalState } from "../shared/local-chat";
 import {canExplainLocalMessage} from "../shared/local-chat";
-import { localRequest as sendLocalRequest,explainLocalMessage,LocalRequestError } from "./local-chat-api";
+import { localRequest as sendLocalRequest,explainLocalMessage,LocalRequestError,beginLocalWork,sharedDemoEnabled,sharedDemoChatId } from "./local-chat-api";
+import {SharedDemoRooms} from "./SharedDemoRooms";
+import {demoRoomUrl} from "../shared/demo-room";
+import {useLocalRoomSync} from "./useLocalRoomSync";
 import { ExplanationPanel } from "./ExplanationPanel";
 import {EmojiInspector} from "./EmojiInspector";
 import {CustomEmojiArtwork} from "./CustomEmojiArtwork";
@@ -24,15 +27,22 @@ import {hasLocalVisual,selectedEmoji} from "../shared/local-chat";
 import {PublicArtwork as Art,PublicNotices as Notice} from "./LocalPublicVisual";
 
 export function LocalChatApp() {
+  return sharedDemoEnabled()&&!sharedDemoChatId()
+    ?<div className="local-app"><SharedDemoRooms/></div>:<LocalChatRoom/>;
+}
+function LocalChatRoom() {
+  const chatId=sharedDemoChatId();
   const [language, setLanguage] = useState<Language>("en");
   const t = (en: string, zh: string) => language === "en" ? en : zh;
   const [state, updateState] = useState<LocalState>({ revision: 0, messages: [], catalogAccepted: false, cooldownUntil: 0, providerRequests: 0 });
+  const stateRef=useRef(state);
   const direct=state.interaction==="direct-personal";
   const canExplainMessage=(message:LocalMessage|undefined)=>!!message&&(!direct||canExplainLocalMessage(message));
   const internet=direct&&state.catalogSource==="internet";
-  const setState=(value:LocalState|((previous:LocalState)=>LocalState))=>updateState(previous=>{
-    const next=typeof value==="function"?value(previous):value;return next.revision>=previous.revision?next:previous;
-  });
+  const setState=(value:LocalState|((previous:LocalState)=>LocalState))=>{
+    const next=typeof value==="function"?value(stateRef.current):value;
+    if(next.revision>=stateRef.current.revision){stateRef.current=next;updateState(next);}
+  };
   const [catalog, setCatalog] = useState<LocalCatalogReview>();
   const [catalogOpen, setCatalogOpen] = useState(false), [attest, setAttest] = useState(false);
   const [speaker, setSpeaker] = useState("Alex"), [draft, setDraft] = useState("");
@@ -90,6 +100,27 @@ export function LocalChatApp() {
     }
   }
   const resetResults = () => { generation.current++; abort.current?.abort(); setReview(undefined); setConsent(false); setResult(undefined); setExplanationOwner(undefined); setPreview(undefined); };
+  const [peerUpdate,setPeerUpdate]=useState(false);
+  const peerArrival=useRef(false);
+  function invalidatePeerResults(){
+    resetResults();insertionEpoch.current++;pendingInsertion.current=undefined;creationHasWork.current=false;
+  }
+  function expiredRoom(){
+    invalidatePeerResults();setExpression(v=>({...v,version:v.version+1}));
+    setBootstrapError("auth-required");setBootstrap("failed");
+  }
+  const syncError=useLocalRoomSync(initialized,{
+    busy:()=>busy||quickFlight.current||closingRoom.current,
+    adopt:next=>{
+      if(next.revision<stateRef.current.revision)return;
+      if(next.revision>stateRef.current.revision){
+        peerArrival.current=true;invalidatePeerResults();setPeerUpdate(true);
+        if(editing&&!next.messages.some(m=>m.id===editing))setEditing("");
+      }
+      setState(next);
+    },
+    expired:expiredRoom
+  });
   useEffect(()=>{
     const media=matchMedia("(max-width: 1099px)"),resize=()=>setCompact(media.matches);
     media.addEventListener("change",resize);return()=>media.removeEventListener("change",resize);
@@ -105,8 +136,9 @@ export function LocalChatApp() {
   useEffect(()=>{
     if(state.messages.length>previousCount.current){
       if(timeline.current)timeline.current.scrollTop=timeline.current.scrollHeight;
-      if(compact){setPanelOpen(false);requestAnimationFrame(()=>composerInput.current?.focus());}
+      if(compact&&!peerArrival.current){setPanelOpen(false);requestAnimationFrame(()=>composerInput.current?.focus());}
     }
+    peerArrival.current=false;
     previousCount.current=state.messages.length;
   },[state.messages.length,compact]);
   useEffect(()=>{if(demoLoaded&&timeline.current)timeline.current.scrollTop=0;},[demoLoaded]);
@@ -161,14 +193,23 @@ export function LocalChatApp() {
     setCommand("explainVisual");if(fileInput.current)fileInput.current.value="";
     setExpression(emptyExpression());setCreativeOptions(emptyCreativeDraft(language));setBatchOptions({count:3,referenceMode:"popular-text"});creationHasWork.current=false;
   }
-  function clearRoom(){if(!initialized)return;clearLocalForm();void action(async()=>setState(await localRequest<LocalState>("reset")));}
+  function clearRoom(){
+    if(!initialized)return;
+    if(chatId&&!window.confirm(t(`Clear Chat ID "${chatId}" for EVERYONE? Messages, profiles and current work will be removed.`,
+      `为所有人清空 Chat ID "${chatId}"？消息、偏好和当前任务将被清除。`)))return;
+    clearLocalForm();void action(async()=>setState(await localRequest<LocalState>("reset",chatId?{revision:stateRef.current.revision,confirmSharedReset:true}:{})));
+  }
   async function closeRoom(){
-    if(!initialized||closingRoom.current||!window.confirm(t("Close this room and erase its messages and profiles? Other rooms are unchanged.","关闭本房间并清除其中的消息与偏好？不会影响其他房间。")))return;
+    if(!initialized||closingRoom.current||!window.confirm(chatId
+      ?t("Leave this tab? Its unsent drafts will be discarded. The shared room and other participants remain.","离开本标签页？未发送的草稿将被丢弃。共享房间及其他参与者不受影响。")
+      :t("Close this room and erase its messages and profiles? Other rooms are unchanged.","关闭本房间并清除其中的消息与偏好？不会影响其他房间。")))return;
     closingRoom.current=true;
     composer.cancelRead();
     try{await action(async()=>{
-      await localRequest("session/close");clearLocalForm();
-      updateState({revision:0,messages:[],catalogAccepted:false,cooldownUntil:0,providerRequests:0});
+      await localRequest("session/close");
+      if(chatId){window.location.assign("/chat");return;}
+      clearLocalForm();
+      stateRef.current={revision:0,messages:[],catalogAccepted:false,cooldownUntil:0,providerRequests:0};updateState(stateRef.current);
       setCatalog(undefined);setCatalogOpen(false);setBootstrap("closed");
     });}finally{closingRoom.current=false;}
   }
@@ -187,7 +228,7 @@ export function LocalChatApp() {
     setBootstrap("pending");setBootstrapError("");
     try{
       const value=await sendLocalRequest<LocalState & {catalog:LocalCatalogReview}>("session",{},controller.signal);
-      if(mounted.current&&id===bootEpoch.current){updateState(value);setCatalog(value.catalog);setSpeaker(value.outgoingSpeaker??"Alex");setBootstrap("ready");}
+      if(mounted.current&&id===bootEpoch.current){stateRef.current=value;updateState(value);setCatalog(value.catalog);if(!state.revision)setSpeaker(value.outgoingSpeaker??"Alex");setBootstrap("ready");setPeerUpdate(false);}
     }catch(e){
       if(mounted.current&&id===bootEpoch.current&&!controller.signal.aborted){
         setBootstrapError(e instanceof TypeError||e instanceof SyntaxError?"not-configured":e instanceof Error?e.message:"not-configured");setBootstrap("failed");
@@ -199,13 +240,21 @@ export function LocalChatApp() {
     const tick = setInterval(() => setClock(Date.now()), 1000);
     return () => { mounted.current=false;bootEpoch.current++;bootController.current?.abort();bootController.current=undefined;generation.current++;actionId.current++;clearInterval(tick); abort.current?.abort(); };
   }, []);
-  async function refresh() { const epoch=generation.current;try { setState(await localRequest<LocalState>("state")); } catch { if(mounted.current&&epoch===generation.current)setError("auth-required"); } }
+  async function refresh() {
+    const epoch=generation.current;
+    try {setState(await localRequest<LocalState>("state"));}
+    catch(e){if(mounted.current&&epoch===generation.current&&!(e instanceof DOMException&&e.name==="AbortError")){
+      if(e instanceof LocalRequestError&&e.message==="auth-required")expiredRoom();
+      else setError(e instanceof LocalRequestError?e.message:"not-configured");
+    }}
+  }
   async function action(work: () => Promise<void>) {
     if(!initialized)return;
+    const finish=beginLocalWork();
     const id=++actionId.current,epoch=++generation.current;
     setBusy(true); setError("");
     try { await work(); } catch (e) { if(mounted.current&&id===actionId.current&&epoch===generation.current){if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "not-configured"); await refresh();} }
-    finally { if(mounted.current&&id===actionId.current)setBusy(false); }
+    finally { finish();if(mounted.current&&id===actionId.current)setBusy(false); }
   }
   async function invalidate() {
     if(!initialized)return;
@@ -226,10 +275,12 @@ export function LocalChatApp() {
   const profileSpeaker=explainedMessage?.speaker??speaker;
   function profileEditing(dirty:boolean){setProfileDirty(dirty);if(dirty)void invalidate();}
   async function saveProfile(profile:SpeakerProfile|null){
+    let saved=false;
     resetResults();await action(async()=>{
       const latest=await localRequest<LocalState>("state");
-      setState(await localRequest<LocalState>("speaker/profile",{revision:latest.revision,speaker:profileSpeaker,profile}));setProfileDirty(false);
+      setState(await localRequest<LocalState>("speaker/profile",{revision:latest.revision,speaker:profileSpeaker,profile}));setProfileDirty(false);saved=true;
     });
+    return saved;
   }
   function clearInsertionPreview() {
     const pending=pendingInsertion.current,ticket=++insertionEpoch.current,epoch=generation.current;setPreview(undefined);
@@ -303,6 +354,9 @@ export function LocalChatApp() {
         { version: 0, intent, context, preferences: { source: "requester-reported", confirmed: true,
         outputLanguage: language, familiarity: "", formality, relationship: "", humor: "", avoid } };
       let current=state;
+      if(command==="recommendVisual"&&current.outgoingSpeaker!==speaker.trim()){
+        current=await localRequest<LocalState>("speaker",{speaker:speaker.trim()});setState(current);
+      }
       if(command==="recommendVisual"&&internet&&!current.catalogAccepted){
         const controller=new AbortController();abort.current=controller;
         current=await localRequest<LocalState>("catalog/load",{revision:current.revision},controller.signal);setState(current);
@@ -323,22 +377,6 @@ export function LocalChatApp() {
       setReview(undefined);setConsent(false);
     });
   }
-  useEffect(()=>{
-    if(!direct||!creating||!initialized||busy||!["generation-busy","generation-cooling-down"].includes(state.generation?.reason??""))return;
-    const controller=new AbortController(),ticket=generation.current;
-    let timer:ReturnType<typeof setTimeout>;
-    const fresh=()=>!controller.signal.aborted&&mounted.current&&generation.current===ticket;
-    const refresh=async()=>{
-      try{
-        const next=await sendLocalRequest<LocalState>("state",{},controller.signal);
-        if(!fresh())return;
-        setState(previous=>previous.revision===next.revision?{...previous,generation:next.generation,cooldownUntil:next.cooldownUntil}:previous);
-        if(["generation-busy","generation-cooling-down"].includes(next.generation?.reason??""))timer=setTimeout(refresh,1000);
-      }catch(error){if(fresh())setError(error instanceof Error?error.message:"local-network-error");}
-    };
-    timer=setTimeout(refresh,1000);
-    return()=>{controller.abort();clearTimeout(timer);};
-  },[direct,creating,initialized,busy,state.revision,state.generation?.reason,state.generation?.cooldownUntil]);
   const cooldown = Math.max(0, Math.ceil(((direct&&creating?state.generation?.cooldownUntil??0:state.cooldownUntil) - clock) / 1000));
   const errors: Record<string, string> = {
     "meme-source-unavailable":t("Imgflip is unavailable. Retry the public source explicitly; no demo images or model results were substituted.","Imgflip 暂不可用。可手动重试加载公开来源；不会用演示图片或伪造结果替代。"),
@@ -408,17 +446,19 @@ export function LocalChatApp() {
       <button className="local-primary" disabled={bootstrap==="pending"} onClick={()=>void initialize()}>{bootstrap==="closed"?t("Open a new local room","打开新本地房间"):t("Retry connection","重试连接")}</button>
       <p>{t("Retry never clears another room or calls AI.","重试不会清空其他房间，也不会调用 AI。")}</p>
     </section>}
-    <header className="local-header" inert={compact&&(panelOpen||chatsOpen)}><a className="local-brand" href="/chat"><span className="local-logo">VC</span><span>Visual Copilot</span></a>
+    <header className="local-header" inert={compact&&(panelOpen||chatsOpen)}><a className="local-brand" href={chatId?demoRoomUrl(chatId):"/chat"}><span className="local-logo">VC</span><span>Visual Copilot</span></a>
       <label className="studio-search"><ChatIcon name="search"/><input aria-label={t("Search this conversation","搜索此对话")} value={search} maxLength={200} placeholder={t("Search this conversation · local only","搜索此对话 · 仅本地")} onChange={e=>setSearch(e.target.value)}/>{search&&<button aria-label={t("Clear search","清除搜索")} onClick={()=>setSearch("")}><ChatIcon name="close"/></button>}</label>
       <nav><span className="local-badge">{t("Standalone prototype","独立原型")}</span>
         <select aria-label="Language / 语言" value={language} onChange={e => { setLanguage(e.target.value as Language); document.documentElement.lang = e.target.value; if(initialized)void invalidate(); }}>
           <option value="zh-CN">简体中文</option><option value="en">English</option></select>
-        <span className="studio-self-avatar" title={t("One local user, simulated speakers","一位本地用户，模拟多位发言者")}>A</span></nav></header>
+        <span className="studio-self-avatar" title={chatId?t("Shared demo, unverified simulated speakers","共享演示，发言者名称未经验证"):t("One local user, simulated speakers","一位本地用户，模拟多位发言者")}>A</span></nav></header>
     <div className="local-disclosure" inert={compact&&(panelOpen||chatsOpen)}><span>{t("STANDALONE · SIMULATED","独立原型 · 模拟对话")}</span>
-      <span className="studio-disclosure-short">{direct?t("Owned test content · Explain click runs AI · Nothing is sent to Teams","自有测试内容 · 点击解释即调用 AI · 不发送到 Teams"):t("Owned test content · Review before AI · Nothing is sent to Teams","自有测试内容 · 预览后调用 AI · 不发送到 Teams")}</span>
+      <span className="studio-disclosure-short">{chatId?t(`Shared demo ${chatId} · Anyone knowing this ID can read/change it · No sensitive content`,`共享演示 ${chatId} · 知道 ID 即可查看／修改 · 请勿使用敏感内容`):direct?t("Owned test content · Explain click runs AI · Nothing is sent to Teams","自有测试内容 · 点击解释即调用 AI · 不发送到 Teams"):t("Owned test content · Review before AI · Nothing is sent to Teams","自有测试内容 · 预览后调用 AI · 不发送到 Teams")}</span>
       <details><summary>{t("About this prototype","原型说明")}</summary><div>
-      {direct?t(` One person plays every speaker. Use permitted non-sensitive test content. Explain supports pictures, stickers, GIFs and Unicode emoji, including text with emoji. The click sends the selected content, up to ${LOCAL_CONTEXT_LIMIT} message contexts and saved sender preferences to the configured model immediately. Plain text without emoji can provide context, not a separate Explain target. Other AI flows retain their previews. No Teams, Graph, external posting or chat storage.`,
-        ` 一个人模拟所有发言者。仅使用有权使用的非敏感测试内容。解释支持图片、贴纸、GIF 和 emoji，也支持文字搭配 emoji。点击后立即将所选内容、最多 ${LOCAL_CONTEXT_LIMIT} 条消息上下文和已保存的发言者偏好发送给已配置的模型。不含 emoji 的普通文字可作为上下文，但不能单独解释。其他 AI 流程保留预览。不连接 Teams/Graph，不外发消息，不持久保存聊天。`):t(" One person plays every speaker. Use only your own permitted, non-sensitive test content. Nothing reaches the model until you review and consent. No Teams, Graph, external sending, or chat storage.",
+      {chatId&&<p>{t("Multiple local browser profiles can share this Chat ID. Speaker names are simulated, not verified identities. Anyone knowing the ID can join, read, change or clear the room.",
+        "多个本地浏览器配置可共享此 Chat ID。发言者名称只是模拟，并非验证过的身份。知道 ID 的任何人都能加入、查看、修改或清空房间。")}</p>}
+      {direct?t(` ${chatId?"Speaker names are unverified.":"One person plays every speaker."} Use permitted non-sensitive test content. Explain supports pictures, stickers, GIFs and Unicode emoji, including text with emoji. The click sends the selected content, up to ${LOCAL_CONTEXT_LIMIT} message contexts and saved sender preferences to the configured model immediately. Plain text without emoji can provide context, not a separate Explain target. Other AI flows retain their previews. No Teams, Graph, external posting or chat storage.`,
+        ` ${chatId?"发言者名称未经验证。":"一个人模拟所有发言者。"}仅使用有权使用的非敏感测试内容。解释支持图片、贴纸、GIF 和 emoji，也支持文字搭配 emoji。点击后立即将所选内容、最多 ${LOCAL_CONTEXT_LIMIT} 条消息上下文和已保存的发言者偏好发送给已配置的模型。不含 emoji 的普通文字可作为上下文，但不能单独解释。其他 AI 流程保留预览。不连接 Teams/Graph，不外发消息，不持久保存聊天。`):t(" One person plays every speaker. Use only your own permitted, non-sensitive test content. Nothing reaches the model until you review and consent. No Teams, Graph, external sending, or chat storage.",
         " 一个人模拟所有发言者。仅使用你有权使用的非敏感测试内容；预览并明确同意后才会调用模型。不连接 Teams/Graph，不外发消息，不持久保存聊天。")}</div></details></div>
     <main className="local-layout" inert={!initialized} aria-busy={bootstrap==="pending"}>
       <nav className="studio-rail" inert={compact&&(panelOpen||chatsOpen)} aria-label={t("App navigation","应用导航")}>
@@ -429,6 +469,7 @@ export function LocalChatApp() {
       </nav>
       {compact&&chatsOpen&&<div className="studio-scrim" onClick={hideChats}/>}
       <aside ref={chatList} className="local-sidebar" inert={compact&&panelOpen} aria-label={t("Chats","会话列表")} onKeyDown={e=>{if(compact&&chatsOpen){containFocus(e);if(e.key==="Escape")hideChats();}}}>
+        {chatId&&<SharedDemoRooms chatId={chatId} expiresAt={state.sharedRoom?.expiresAt} language={language}/>}
         <div className="studio-list-heading"><h1>{t("Chats","聊天")}</h1><span>{t("1 local room","1 个本地会话")}</span><button className="studio-mobile-only" aria-label={t("Close chats","关闭会话列表")} onClick={hideChats}><ChatIcon name="close"/></button></div>
         <p className="studio-section-label">{t("PINNED","置顶")}</p>
         <button className="studio-conversation-row" aria-current="page" onClick={()=>{setChatsOpen(false);if(compact)setPanelOpen(false);composerInput.current?.focus();}}>
@@ -442,12 +483,15 @@ export function LocalChatApp() {
         <button className="local-secondary" onClick={() => setCatalogOpen(!catalogOpen)}>{t("Review asset library", "审阅素材库")} <span>{internet?state.internetCatalog?.assets.length??0:8}</span></button>
         <p className="local-muted">{state.webCreation?.provider==="Google Images via SerpApi"?t("Create uses Google Images via SerpApi when configured. Only public search keywords are sent; rights remain unverified.","创作在配置后通过 SerpApi 搜索 Google 图片。仅发送公开搜索词，素材权利仍需核实。"):state.webCreation?.provider==="Wikimedia Commons"?t("Create uses Wikimedia Commons, a shared image library with per-file licenses. No search key required.","创作使用维基共享图片库，保留各文件许可，无需搜索密钥。"):state.webCreation?t("Find uses the selected asset library. Create uses Brave web image search when configured.","推荐现成图使用所选素材库；创作模式在配置后使用 Brave 网络图片搜索。"):internet?t("Express uses Imgflip popular templates. Load the public source explicitly; this is not a Chinese real-time hot list.","表达默认使用 Imgflip 热门模板，需点击加载公开来源；不是中文实时热榜。"):direct?t("Original geometric demo library selected explicitly.","已明确选择原创几何演示库。"):state.catalogAccepted ? t("Local-use attestation active for this session only.", "本会话的本地测试使用确认已生效。") : t("Assets await your local-use permission review.", "素材等待你审阅并确认本地测试使用权限。")}</p>
         <button className="local-text-button" onClick={clearRoom}>{clearLabel}</button>
-        <button className="local-text-button" onClick={()=>void closeRoom()}>{t("Close this room","关闭本房间")}</button></div>
+        <button className="local-text-button" onClick={()=>void closeRoom()}>{chatId?t("Leave this tab","离开本标签页"):t("Close this room","关闭本房间")}</button></div>
       </aside>
       <section className="local-chat-panel" inert={compact&&(panelOpen||chatsOpen)}><div className="local-panel-heading studio-chat-heading"><span className="studio-room-avatar">H</span><div><h2>{t("Hackathon studio","Hackathon 创作室")}</h2><span className="studio-participants">{(participants.length?participants:["Alex"]).join(", ")} · {t("simulated participants","模拟成员")}</span></div>
         <button className="studio-mobile-only mobile-chat-clear" aria-label={clearLabel} onClick={clearRoom}><ChatIcon name="trash"/></button>
         <button className="studio-panel-toggle" aria-label={t("Open AI panel","打开 AI 面板")} aria-expanded={panelOpen} onClick={showAssistant}><ChatIcon name="sparkle"/><span>Copilot</span></button></div>
-        <div className="studio-chat-subhead"><span className="studio-chat-tab">{t("Conversation","对话")}</span><small>{demoLoaded||state.messages.some(m=>m.demoMedia)?        t("Authored demo · loading makes no AI call","预写演示 · 载入不调用 AI"):t("One person · every speaker is simulated","单人操作 · 所有发言者均为模拟")}</small></div>
+        <div className="studio-chat-subhead"><span className="studio-chat-tab">{t("Conversation","对话")}</span><small>{state.messages.some(m=>m.demoTimeline)?t("Authored demo · illustrative times · no AI call on load","预写演示 · 示意时间 · 载入不调用 AI"):demoLoaded||state.messages.some(m=>m.demoMedia)?        t("Authored demo · loading makes no AI call","预写演示 · 载入不调用 AI"):chatId?t("Shared demo · unverified simulated speakers","共享演示 · 发言者名称未经验证"):t("One person · every speaker is simulated","单人操作 · 所有发言者均为模拟")}</small></div>
+        {initialized&&syncError&&<p className="local-info" role="alert">{t("Conversation refresh failed. Retrying with backoff (up to 30 seconds); your drafts are kept.","对话刷新失败，将退避重试（最长 30 秒）；草稿已保留。")}</p>}
+        {initialized&&peerUpdate&&<p className="local-info" role="status">{t("Conversation updated in another window. Stale AI previews were cleared; your drafts are kept. Reload reviewed context before preparing AI again.","另一窗口已更新对话。过期的 AI 预览已清除，草稿已保留。再次准备 AI 前请重新加载并审阅上下文。")}
+          <button onClick={()=>setPeerUpdate(false)}>{t("Dismiss update notice","关闭更新提示")}</button></p>}
         <div className="local-messages" ref={timeline} aria-label={t("Local conversation", "本地对话")}>
           {state.messages.length === 0 && <div className="local-empty"><div className="local-orbit">✦</div><h3>{t("A conversation starts here", "从一句话开始")}</h3>
             <p>{state.emojiExpressions?t("Try pictures, GIFs and emoji in one conversation, or add your own message. Loading the demo makes no AI call.","在同一段对话中体验图片、GIF 和 emoji，也可以添加自己的消息。载入演示不调用 AI。"):t("Add text, emoji or your own visual. Change the speaker to simulate a reply.", "添加文字、表情或自有图片，切换发言者来模拟回应。")}</p>
@@ -532,7 +576,7 @@ export function LocalChatApp() {
             {(["image","emoji"] as const).map(kind=><label key={kind}><input type="radio" name="expression-kind" checked={expressionKind===kind}
               onChange={()=>{setExpressionKind(kind);void invalidate();}}/>{kind==="image"?t("Images / GIFs","图片 / GIF"):t("Unicode emoji","Unicode emoji")}</label>)}
           </fieldset>}
-          {unified&&<UnifiedExpression emoji={emojiMode} value={expression} creating={creating} language={language} disabled={profileDirty}
+          {unified&&<UnifiedExpression contextual={state.contextualCreation} emoji={emojiMode} value={expression} creating={creating} language={language} disabled={profileDirty}
             onChange={editExpression} onMode={value=>{if(value!==creating)selectTool(value?"create":"express",false);}}
             onReload={()=>editExpression({context:expressionContext(),loaded:true})}/>}
           {direct&&quickMode&&!creating&&command==="explainVisual"&&<section aria-label={t("Quick explanation","直接解释")}>
@@ -545,8 +589,8 @@ export function LocalChatApp() {
           </section>}
           {!emojiMode&&!creating&&command==="recommendVisual"&&sourceControls}
           {direct&&!creating&&(command==="recommendVisual"||!!explainedMessage)&&<SpeakerProfileEditor room={state} speaker={profileSpeaker} role={command==="explainVisual"?"sender":"outgoing"} language={language} busy={busy} onDirty={profileEditing} onSave={saveProfile}/>}
-          <fieldset className="studio-ai-fields"           disabled={profileDirty&&!creating||busy&&creating&&!emojiMode}>
-          {emojiMode?<LocalEmojiExpression room={state} common={expression} language={language} replyTo={emojiReply}
+          <fieldset className="studio-ai-fields"           disabled={!initialized||profileDirty&&!creating||busy&&creating&&!emojiMode}>
+          {emojiMode?<LocalEmojiExpression room={state} common={expression} language={language} replyTo={emojiReply} speaker={speaker}
             blocked={profileDirty||!!editing} onState={setState} onWork={()=>{creationHasWork.current=true;}}
             onReply={id=>{setEmojiReply(id);editExpression({context:expressionContext(id??undefined),loaded:true});}}
             onInsert={text=>{

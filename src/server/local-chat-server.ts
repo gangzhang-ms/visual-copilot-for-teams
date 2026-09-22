@@ -22,19 +22,20 @@ import {searchWebImages,WebImageSearchError} from "./web-image-search";
 import {deriveWebSearchTerms} from "../shared/web-search-terms";
 import { loadLocalChatConfig } from "./local-chat-config";
 import { loadLocalCatalog } from "./local-catalog";
-import { failure, requireVisual, VisualError } from "./visual-errors";
+import { failure, requireVisual, VisualError, PlanningSchemaError, PlanningEvidenceError } from "./visual-errors";
 import { LocalGenerationSession, generationObject, generationText, type LocalGenerationOptions } from "./local-generation";
 import { GenerationError, generationLimits, localPaidLease, generatedWorkerLease, generationReadiness, loadGenerationProfile } from "./local-generation-config";
 import {validSpeakerProfile,type SpeakerContext,type SpeakerProfile} from "../shared/expression";
 import {InternetMemes,type MemeSnapshot} from "./internet-memes";
 import type {CatalogAsset} from "../catalog/visual-catalog";
-import {localDemo} from "./local-demo";
+import {localDemo,combinedDemoTimes} from "./local-demo";
 import {roomMediaPolicy,withinRoomMediaBudget} from "./local-generation-config";
 import {modelRequestLimit} from "./visual-config";
 import type {ImageCapabilityState} from "./image-generation-gateway";
 import {LOCAL_CONTEXT_REVIEW_LIMIT,localContextWithinLimit} from "../shared/local-context";
 import {parseEmojiDraft,buildEmojiExpression,validateEmojiOptions} from "./emoji-expression";
 import {emojiInsertion,type EmojiSuggestions} from "../shared/emoji-expression";
+import {validDemoChatId,demoRoomLifetimeMs,scopedDemoMedia} from "../shared/demo-room";
 
 interface GeneratedCache {
   assetId:string;version:number;detached:boolean;inFlight:number;compressedBytes:number;snapshotBytes:number;
@@ -42,6 +43,8 @@ interface GeneratedCache {
 }
 
 interface BrowserSession {
+  chatId?:string;
+  knownSources:Map<string,{source:string;context:string}>;
   emojiSuggestions?:EmojiSuggestions;
   creationSnapshot?:MemeSnapshot;
   catalogSource:"internet"|"original-demo";catalogAssets:CatalogAsset[];memeCatalog?:MemeSnapshot;memeSnapshots:Map<string,MemeSnapshot>;
@@ -70,7 +73,8 @@ async function readBody(req: IncomingMessage) {
   return object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
 }
 
-export async function createLocalChatServer(key: string, options: { emojiExpressions?:boolean;contextualCreation?:boolean;transport?: Transport; cooldownMs?: number; clientRoot?: string; generation?: LocalGenerationOptions;interaction?:"direct-personal";creationChoices?:boolean;mixedCreation?:boolean;semanticCreation?:boolean;webCreation?:boolean;webProvider?:"commons"|"brave"|"serpapi";webSearchKey?:string;webCredentialUnavailable?:boolean;webSearchTransport?:Transport;sourceDiagnostic?:(event:CommonsDiagnostic)=>void;catalogSource?:"original-demo";memeTransport?:Transport;modelDiagnostic?:(event:ModelDiagnostic)=>void } = {}) {
+export async function createLocalChatServer(key: string, options: { sharedDemo?:boolean;emojiExpressions?:boolean;contextualCreation?:boolean;transport?: Transport; cooldownMs?: number; clientRoot?: string; generation?: LocalGenerationOptions;interaction?:"direct-personal";creationChoices?:boolean;mixedCreation?:boolean;semanticCreation?:boolean;webCreation?:boolean;webProvider?:"commons"|"brave"|"serpapi";webSearchKey?:string;webCredentialUnavailable?:boolean;webSearchTransport?:Transport;sourceDiagnostic?:(event:CommonsDiagnostic)=>void;catalogSource?:"original-demo";memeTransport?:Transport;modelDiagnostic?:(event:ModelDiagnostic)=>void } = {}) {
+  const sharedDemo=options.sharedDemo===true;
   const direct=options.interaction==="direct-personal";
   const emojiExpressions=direct&&options.emojiExpressions===true;
   const creationChoices=direct&&options.creationChoices===true;
@@ -122,9 +126,11 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
     if (/\.(js|css)$/.test(file)) staticFiles.set(`/assets/${file}`, { bytes: await readFile(resolve(clientRoot, "assets", file)),
       mime: file.endsWith(".js") ? "text/javascript" : "text/css" });
   }
-  staticFiles.set("/chat", { bytes: await readFile(resolve(clientRoot, "local-chat.html")), mime: "text/html" });
+  const chatHtml=await readFile(resolve(clientRoot,"local-chat.html"),"utf8");
+  staticFiles.set("/chat", { bytes: Buffer.from(sharedDemo?chatHtml.replace("</head>",'<meta name="local-shared-demo" content="true"></head>'):chatHtml), mime: "text/html" });
   staticFiles.set("/manual", { bytes: await readFile(resolve(clientRoot, "index.html")), mime: "text/html" });
   const state = (s: BrowserSession): LocalState => ({ revision: s.revision, messages: s.messages,mediaBytes:ordinaryBytes(s)+s.generation.bytes(), catalogAccepted: s.catalogSource==="internet"?!!s.memeCatalog:permission(s) === catalog.digest,
+    ...(s.chatId?{sharedRoom:{chatId:s.chatId,expiresAt:s.expiresAt}}:{}),
     ...(creationChoices?{creationChoices:true}:{}),
     ...(contextualCreation?{contextualCreation:true}:{}),
     ...(emojiExpressions?{emojiExpressions:true}:{}),
@@ -170,6 +176,7 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
     if (!keepGeneration) s.generation.invalidate();
   }
   function erase(s: BrowserSession) {
+    s.knownSources.clear();
     delete s.memeCatalog;for(const snapshot of s.memeSnapshots.values())snapshot.release();s.memeSnapshots.clear();selectCatalog(s);
     s.profiles.clear();s.outgoingSpeaker="Alex";
     invalidate(s); s.generation.invalidate(true); s.messages = []; s.media.clear(); s.attachmentBytes.clear(); delete s.attestation;
@@ -185,14 +192,14 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
     for (const [id, s] of sessions) { s.generation.cleanup(); if (s.expiresAt <= Date.now())retire(id,s); }
     collectRetired();
   }, 30_000); timer.unref();
-  function newSession(): BrowserSession {
+  function newSession(chatId?:string): BrowserSession {
     for(const [id,s] of sessions)if(s.expiresAt<=Date.now())retire(id,s);
     collectRetired();
     if(!direct)requireVisual(sessions.size+retiring.size < 4, "local-session-capacity");
     const analysis: AnalysisSession = { id: opaque(), binding: { invocationId: "local-simulation", tenantId: "", userId: "",
-      commandId: "explainVisual", commandContext: "compose" }, accessToken: "", expiresAt: Date.now() + 30 * 60_000,
+      commandId: "explainVisual", commandContext: "compose" }, accessToken: "", expiresAt: Date.now() + demoRoomLifetimeMs,
       version: 1, shareVersion: 1, abort: new AbortController(), sources: new Map(), mediaSources: new Map() };
-    const s: BrowserSession = {catalogSource:direct&&!options.catalogSource?"internet":"original-demo",catalogAssets:[],memeSnapshots:new Map(),outgoingSpeaker:"Alex",profiles:new Map(),csrf: opaque(), expiresAt: analysis.expiresAt, revision: 1, messages: [], media: new Map(),
+    const s: BrowserSession = {chatId,knownSources:new Map(),catalogSource:direct&&!options.catalogSource?"internet":"original-demo",catalogAssets:[],memeSnapshots:new Map(),outgoingSpeaker:"Alex",profiles:new Map(),csrf: opaque(), expiresAt: analysis.expiresAt, revision: 1, messages: [], media: new Map(),
       attachmentBytes: new Map(), analysis, busy: false, service: undefined!, generation: undefined! };
     const plannedQueries=new WeakMap<import("./meme-source-ranking").SourceRankingInput,{query:string;digest:string}>();
     s.generation = new LocalGenerationSession({ id:analysis.id, expiresAt:s.expiresAt, revision:()=>s.revision, messages:()=>s.messages,
@@ -200,9 +207,16 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
         inspiration:(intent,signal)=>memes.inspiration(intent,signal),
         ...(contextualCreation?{plan:async(input:import("./meme-source-ranking").SourceRankingInput,signal:AbortSignal)=>{
           const version=s.revision,included=new Set(input.draft.context.filter(c=>c.included).map(c=>c.label));
+          input.contextRoles=s.messages.filter(m=>included.has(m.id)).map(m=>({label:m.id,speaker:m.speaker,role:m.speaker===s.outgoingSpeaker?"outgoing":"other"}));
+          input.knownSources=s.messages.filter(m=>included.has(m.id)&&s.knownSources.has(m.id)).slice(-2).map(m=>({label:m.id,...s.knownSources.get(m.id)!}));
+          input.visualOrigins=s.messages.filter(m=>included.has(m.id)).map(m=>({label:m.id,origin:m.generated?"generated-interpretation":m.demoMedia==="custom-emoji"?"original-custom-emoji":"conversation-image"}));
           const visuals=s.messages.filter(m=>included.has(m.id)&&hasLocalVisual(m));
           const incoming=visuals.filter(m=>m.speaker!==s.outgoingSpeaker);
-          const selected=input.draft.visualContextId?visuals.filter(m=>m.id===input.draft.visualContextId):(incoming.length?incoming:visuals).slice(-2);
+          const candidates=incoming.length?incoming:visuals;
+          const explained=candidates.filter(m=>s.knownSources.has(m.id)).at(-1);
+          const selected=input.draft.visualContextId?visuals.filter(m=>m.id===input.draft.visualContextId):
+            explained?[explained,...candidates.filter(m=>m.id!==explained.id).slice(-1)]:
+              candidates.length>1?[candidates[0],candidates.at(-1)!]:candidates;
           requireVisual(!input.draft.visualContextId||selected.length===1,"processing-review-required");
           const media:MediaPreview={samples:[],coverage:[]};
           for(const message of selected){
@@ -241,7 +255,11 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
             return plan;
           }catch(error){
             if(error instanceof VisualError&&["model-provider-auth","model-capability-unverified","model-contract-rejected","model-refused","cancelled"].includes(error.code))throw error;
-            throw new GenerationError("generation-context-planning");
+            const code=error instanceof VisualError?error.code:"unknown";
+            throw new GenerationError("generation-context-planning",code==="model-output-invalid-schema"?"schema":
+              code==="model-output-invalid-references"?"evidence":code==="model-output-truncated"?"truncated":
+              code==="model-output-invalid-json"?"invalid-json":code==="model-provider-unavailable"||code==="model-network-error"?"provider":"unavailable",
+              error instanceof PlanningSchemaError||error instanceof PlanningEvidenceError?error.issues:undefined);
           }finally{permits.delete(request.review.digest);lease.release();}
         }}:{}),
         source:async(intent,signal,input)=>{
@@ -318,13 +336,19 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
     res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer"); res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
-    const send = (status: number, value: unknown) => { if (!res.destroyed) { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(value)); } };
+    let responseChatId:string|undefined;
+    const send = (status: number, value: unknown) => { if (!res.destroyed) { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(value,responseChatId?(key,value)=>scopedDemoMedia(key,value,responseChatId!):undefined)); } };
     try {
       requireVisual(origin && req.headers.host === new URL(origin).host && req.socket.remoteAddress === "127.0.0.1", "permission-denied");
       const url = new URL(req.url ?? "/", origin);
-      requireVisual(url.origin === origin && !url.search, "permission-denied");
+      requireVisual(url.origin === origin, "permission-denied");
+      const chatId=url.searchParams.get("chatId");
+      if(url.search)requireVisual(sharedDemo&&url.searchParams.size===1&&validDemoChatId(chatId),"permission-denied");
       const path = url.pathname === "/" ? "/chat" : url.pathname;
-      if (req.method === "GET" && path === "/healthz") return send(200, { ready: true, scope: "local-development", sessionClose:true, sessionAdmission:direct?"no-count-quota":"legacy-four", model: !gateway.isSuspended(),
+      if(sharedDemo&&path.startsWith("/local/")){
+        requireVisual(validDemoChatId(chatId),"processing-review-required");responseChatId=chatId;
+      }
+      if (req.method === "GET" && path === "/healthz") return send(200, { ready: true, scope: "local-development", ...(sharedDemo?{sharedDemo:true}:{}),sessionClose:true, sessionAdmission:direct?"no-count-quota":"legacy-four", model: !gateway.isSuspended(),
         imageGeneration:generationCapability.reason?"disabled":generationReadiness(loadGenerationProfile(options.generation?.profile),options.generation?.admission).mode,
         imageGenerationScope:"configuration-only",imageGenerationProbe:"not-performed",
         ...(webCreation?{webImageSearch:{...searchState,scope:"configuration-only"}}:{}) });
@@ -332,8 +356,9 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
         const file = staticFiles.get(path)!; res.writeHead(200, { "Content-Type": file.mime }); res.end(file.bytes); return;
       }
       const cookie = new RegExp(`(?:^|; )${cookieName()}=([A-Za-z0-9_-]{43})(?:;|$)`).exec(req.headers.cookie ?? "")?.[1];
-      let s = cookie ? sessions.get(cookie) : undefined;
-      if (s && s.expiresAt <= Date.now()) { retire(cookie!,s);s = undefined; }
+      const roomKey=sharedDemo?`chat:${chatId}`:cookie;
+      let s = roomKey ? sessions.get(roomKey) : undefined;
+      if (s && s.expiresAt <= Date.now()) { retire(roomKey!,s);s = undefined; }
       if (req.method === "GET" && (path.startsWith("/local/assets/") || path.startsWith("/local/generated/") || path.startsWith("/local/memes/"))) {
         requireVisual(s && (!req.headers.origin || req.headers.origin === origin)
           && (!req.headers["sec-fetch-site"] || req.headers["sec-fetch-site"] === "same-origin"), "permission-denied");
@@ -357,22 +382,32 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
       requireVisual(req.method === "POST" && req.headers.origin === origin
         && (!req.headers["sec-fetch-site"] || req.headers["sec-fetch-site"] === "same-origin"), "permission-denied");
       const body = await readBody(req);
+      // Body reads yield: concurrent first joins must converge on one room.
+      if(sharedDemo){
+        s=sessions.get(roomKey!);
+        if(s&&s.expiresAt<=Date.now()){retire(roomKey!,s);s=undefined;}
+      }
       if (path === "/local/session") {
+        if(sharedDemo)requireVisual(Object.keys(body).length===0,"processing-review-required");
         if (!s) {
-          s = newSession(); const id = opaque(); sessions.set(id, s);
-          res.setHeader("Set-Cookie", `${cookieName()}=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=1800`);
+          s = newSession(sharedDemo?chatId!:undefined); const id = sharedDemo?roomKey!:opaque(); sessions.set(id, s);
+          if(!sharedDemo)res.setHeader("Set-Cookie", `${cookieName()}=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=1800`);
         }
         return send(200, { ...state(s), csrf: s.csrf, catalog: { digest: catalog.digest, assets: catalog.review } });
       }
       requireVisual(s && req.headers["x-local-csrf"] === s.csrf, "auth-required");
       if(path==="/local/session/close"){
         requireVisual(Object.keys(body).length===0,"permission-denied");
-        retire(cookie!,s);
+        if(sharedDemo)return send(200,{closed:true,roomPreserved:true});
+        retire(roomKey!,s);
         res.setHeader("Set-Cookie",`${cookieName()}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
         return send(200,{closed:true});
       }
       if (path === "/local/state") return send(200, state(s));
-      if (path === "/local/reset") { erase(s); return send(200, state(s)); }
+      if (path === "/local/reset") {
+        if(sharedDemo)requireVisual(body.revision===s.revision&&body.confirmSharedReset===true,"processing-review-required");
+        erase(s); return send(200, state(s));
+      }
       if (path === "/local/cancel") { invalidate(s); return send(200, state(s)); }
       if(path==="/local/speaker"){
         generationObject(body,["speaker"]);const speaker=text(body.speaker,40).trim();requireVisual(speaker,"processing-review-required");
@@ -533,6 +568,10 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
             staged.push(value);stagedBytes+=value.bytesCount+(value.media?.samples.reduce((n,f)=>n+f.bytes,0)??0);
           }
           requireVisual(s.revision===version&&!signal.aborted&&s.messages.length===0,"cancelled");
+          if(body.scenario==="combined"){
+            const times=combinedDemoTimes();
+            staged.forEach((value,i)=>{value.message.createdAt=times[i];value.message.demoTimeline=true;});
+          }
           staged.forEach(value=>commitMessage(s,value));return send(200,state(s));
         }finally{s.busy=false;res.off("close",disconnected);}
       }
@@ -545,6 +584,7 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
       }
       if (path === "/local/edit" || path === "/local/remove") {
         const id = text(body.id, 100), message = s.messages.find(m => m.id === id); requireVisual(message, "processing-review-required");
+        s.knownSources.delete(id);
         invalidate(s);
         if (path === "/local/remove") { s.generation.releaseMessage(id); s.messages = s.messages.filter(m => m.id !== id); s.media.delete(id); s.attachmentBytes.delete(id);pruneMemes(s); }
         else {
@@ -631,6 +671,11 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
         try {
           const result = await s.service.process(s.analysis, reviewed.processing.digest);
           requireVisual(s.revision === reviewed.revision, "cancelled");
+          if(result.status==="ready"&&result.kind==="explanation"&&s.explainMessageId){
+            const background=result.explanation.background;
+            if(background.source&&background.context)s.knownSources.set(s.explainMessageId,{source:background.source,context:background.context});
+            else s.knownSources.delete(s.explainMessageId);
+          }
           return send(200, { result, state: state(s) });
         } finally {
           lease.release(); if(cache){cache.inFlight--;if(cache.detached&&!cache.inFlight)cache.release();}
@@ -654,7 +699,8 @@ export async function createLocalChatServer(key: string, options: { emojiExpress
         return send(200, state(s));
       }
       return send(404, { status: "blocked", code: "not-configured" });
-    } catch (error) { send(400, error instanceof GenerationError ? {status:"blocked",code:error.code} : failure(error)); }
+    } catch (error) { send(400, error instanceof GenerationError ? {status:"blocked",code:error.code,
+      ...(error.planningReason?{planningReason:error.planningReason}:{}),...(error.planningIssues?{planningIssues:error.planningIssues}:{})} : failure(error)); }
   };
   const server=createServer({requestTimeout:20_000,headersTimeout:10_000},(req,res)=>{
     const request=handle(req,res);requests.add(request);void request.finally(()=>{requests.delete(request);collectRetired();});

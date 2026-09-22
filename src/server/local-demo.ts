@@ -6,6 +6,11 @@ import type {LocalMessage} from "../shared/local-chat";
 type DemoMessage=Pick<LocalMessage,"speaker"|"text"|"demoMedia">&{
   attachment?:{base64:string;mime:"image/png"|"image/gif";category:"image"|"gif"|"sticker"}
 };
+export function combinedDemoTimes(now=new Date()):number[]{
+  const start=new Date(now);start.setHours(11,42,0,0);
+  if(start.getTime()+22*60_000>now.getTime())start.setDate(start.getDate()-1);
+  return [0,1,2,5,6,7,20,21,22].map(minutes=>start.getTime()+minutes*60_000);
+}
 export async function localDemo(language:"en"|"zh-CN",scenario:"film"|"emoji"|"combined"="film"):Promise<DemoMessage[]>{
   const root=resolve("assets",scenario==="emoji"?"emoji-demo":"chat-demo");
   async function attachment(name:string,mime:"image/png"|"image/gif",manifestName="manifest.json"):Promise<NonNullable<DemoMessage["attachment"]>>{

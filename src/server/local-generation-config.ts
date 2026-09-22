@@ -1,7 +1,8 @@
 import template from "../../config/visual-generation.development.json";
 import type { GenerationDestination, LocalGenerationReadiness } from "../shared/local-chat";
 import { digest, opaque } from "./analysis-session";
-export class GenerationError extends Error { constructor(readonly code: string) { super(code); } }
+export class GenerationError extends Error { constructor(readonly code: string,readonly planningReason?:import("../shared/local-chat").PlanningFailureReason,
+  readonly planningIssues?:import("../shared/local-chat").PlanningSchemaIssue[]) { super(code); } }
 export function requireGeneration(value: unknown, code: string): asserts value { if (!value) throw new GenerationError(code); }
 export const generationLimits = Object.freeze({
   prompt: 16 * 1024, request: 20 * 1024, response: 12 * 1024 * 1024, encoded: 11_184_812, decoded: 8 * 1024 * 1024,

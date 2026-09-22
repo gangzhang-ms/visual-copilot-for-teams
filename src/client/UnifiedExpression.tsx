@@ -15,21 +15,22 @@ export function sharedCreativeDraft(options:LocalGenerationDraft,common:Expressi
   return {...options,intent:common.intent,context:common.context.map(({label,text,included})=>({label,text,included})),
     preferences:{...options.preferences,...preferences,language,tone:formality==="unknown"?"":formality==="formal"?"Formal":"Casual"}};
 }
-export function UnifiedExpression({value,creating,language,disabled,onChange,onMode,onReload,emoji=false}:{
+export function UnifiedExpression({value,creating,language,disabled,onChange,onMode,onReload,emoji=false,contextual=false}:{
   value:ExpressionDraft;creating:boolean;language:Language;disabled:boolean;
   onChange:(change:Partial<ExpressionDraft>)=>void;onMode:(creating:boolean)=>void;onReload:()=>void;
   emoji?:boolean;
+  contextual?:boolean;
 }){
   const t=(en:string,zh:string)=>language==="en"?en:zh;
   return <section aria-label={t("Your expression","你的表达")} className="unified-expression">
     <label>{t("What would you like to express?","你想表达什么？")}<textarea aria-label={t("What would you like to express?","你想表达什么？")} maxLength={2000} value={value.intent}
-      placeholder={!emoji&&creating?t("e.g. Sherlock Holmes looking pleased after solving a problem","例如：福尔摩斯发现问题后的得意表情，用来庆祝排查成功"):undefined}
+      placeholder={!emoji&&creating?contextual?t("e.g. A lighthearted reply agreeing to a small pilot while keeping the old links","例如：轻松赞同小范围试点，同时保留旧链接"):t("e.g. Sherlock Holmes looking pleased after solving a problem","例如：福尔摩斯发现问题后的得意表情，用来庆祝排查成功"):undefined}
       onChange={e=>onChange({intent:e.target.value})} disabled={disabled}/></label>
     {!emoji&&<fieldset disabled={disabled}><legend>{t("Choose how","选择表达方式")}</legend>
       <label><input type="radio" name="expression-mode" checked={!creating} onChange={()=>onMode(false)}/>{t("Find an existing image","推荐现成图")}</label>
       <label><input type="radio" name="expression-mode" checked={creating} onChange={()=>onMode(true)}/>{t("Create a new image","生成新图")}</label>
     </fieldset>}
-    {!emoji&&<p className="local-muted">{creating?t("For a movie character, include the film title or character's name.","想用电影角色时，写上片名或角色名。"):
+    {!emoji&&<p className="local-muted">{creating?contextual?t("Describe your reply. Continue a fitting reference, metaphor or joke from reviewed context—or reply plainly when that fits better. No character name is required.","描述你的回复即可；根据已审阅的上下文接梗、延续比喻，或在更合适时普通回复。不必指定角色名。"):t("For a movie character, include the film title or character's name.","想用电影角色时，写上片名或角色名。"):
       t("Choose from three existing images. Internet templates are usually static and can have a local caption.","从三个现成图片中选择。网络模板通常为静态图，      可另加配文。")}</p>}
     {(emoji||!creating)&&<ExpressionPreferences value={value} language={language} disabled={disabled} onChange={onChange} onReload={onReload}/>}
   </section>;

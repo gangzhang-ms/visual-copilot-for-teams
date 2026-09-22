@@ -41,4 +41,8 @@ export const replyVisualStyles=[
     direction:"Visual style is uncertain. Do not claim a matched medium or invent a film identity. Follow explicit requested medium; otherwise retain the cautious visible motif without imposing movie, cartoon or mascot styling."}
 ] as const;
 export type ReplyVisualStyle=typeof replyVisualStyles[number]["id"];
-export interface ExpressionOptions {style:ExpressionStyle;intensity:"auto"|"restrained"|"balanced"|"exaggerated";reference:string}
+export interface ExpressionOptions {style:ExpressionStyle;intensity:"auto"|"restrained"|"balanced"|"exaggerated";reference:string;
+  culturalMode?:"follow-conversation"|"original"|"explicit"}
+export function activeExpressionReference(expression:ExpressionOptions|undefined):string{
+  return expression?.culturalMode===undefined||expression.culturalMode==="explicit"?expression?.reference??"":"";
+}

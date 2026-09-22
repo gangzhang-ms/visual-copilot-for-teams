@@ -121,7 +121,11 @@
     "scan:privacy": "node scripts/scan-forbidden-runtime.mjs",
     "verify:dialog": "node scripts/verify-dialog-artifacts.mjs && node scripts/verify-media-worker.mjs && node scripts/verify-development-model.mjs && node scripts/verify-local-secret-boundary.mjs && node scripts/stage-visual-assets.mjs --check",
     "ci": "npm run typecheck && npm run test:unit && npm run build && npm run verify:dialog && npm run verify:generation && npm run validate:teams && npm run scan:privacy && npm run test:e2e",
-    "assets:prepare": "node scripts/stage-visual-assets.mjs && node scripts/stage-emoji-demo.mjs && node scripts/prepare-publication-fixtures.mjs"
+    "assets:prepare": "node scripts/stage-visual-assets.mjs && node scripts/stage-emoji-demo.mjs && node scripts/prepare-publication-fixtures.mjs",
+    "chat:film-context": "pwsh -NoProfile -File scripts/local-model.ps1 -Mode LocalOpen -Port 4372 -BuildRoot dist-chat-film-context",
+    "chat:contextual-callback": "pwsh -NoProfile -File scripts\\local-model.ps1 -Mode LocalOpen -Port 4372 -BuildRoot dist-chat-film-context",
+    "chat:live-sync": "pwsh -NoProfile -File scripts\\local-model.ps1 -Mode LocalOpen -Port 4373 -BuildRoot dist-chat-live-sync",
+    "chat:shared-demo": "pwsh -NoProfile -File scripts\\local-model.ps1 -Mode LocalOpen -Port 4374 -BuildRoot dist-chat-shared-demo"
   },
   "dependencies": {
     "@azure/msal-node": "^3.7.3",
@@ -142,7 +146,8 @@
     "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.8.3",
     "vite": "^6.1.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "ajv": "^8.17.1"
   },
   "description": "Standalone contextual visual Explain/Express prototype for images, GIFs, stickers and Unicode emoji; gated Teams integration."
 }
